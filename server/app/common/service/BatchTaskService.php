@@ -212,6 +212,9 @@ class BatchTaskService
             $failed = 0;
 
             while (true) {
+                // 检查并重新连接数据库（防止长时间运行导致连接断开）
+                self::ensureDatabaseConnection();
+                
                 // 获取待处理的任务详情
                 $details = BatchTaskDetail::getPendingDetails($task->id, $batchSize);
                 
@@ -221,34 +224,42 @@ class BatchTaskService
 
                 foreach ($details as $detail) {
                     try {
+                        // 每处理10个账号检查一次数据库连接
+                        if ($processed % 10 === 0) {
+                            self::ensureDatabaseConnection();
+                        }
+                        
                         // 处理单个账号验活
                         $result = self::processAccountVerify($detail);
                         
-                        if ($result['success']) {
-                            $success++;
-                            BatchTaskDetail::updateResult(
-                                $task->id,
-                                $detail->account_id,
-                                BatchTaskDetail::STATUS_SUCCESS,
-                                $result['message'],
-                                $result['code'],
-                                $result['token_refreshed'] ?? false
-                            );
-                        } else {
-                            $failed++;
-                            BatchTaskDetail::updateResult(
-                                $task->id,
-                                $detail->account_id,
-                                BatchTaskDetail::STATUS_FAILED,
-                                $result['message'],
-                                $result['code']
-                            );
-                        }
-                        
-                        $processed++;
-                        
-                        // 更新任务进度
-                        $task->updateProgress($processed, $success, $failed);
+                        // 使用事务确保数据一致性，但避免长事务
+                        Db::transaction(function () use ($task, $detail, $result, &$success, &$failed, &$processed) {
+                            if ($result['success']) {
+                                $success++;
+                                BatchTaskDetail::updateResult(
+                                    $task->id,
+                                    $detail->account_id,
+                                    BatchTaskDetail::STATUS_SUCCESS,
+                                    $result['message'],
+                                    $result['code'],
+                                    $result['token_refreshed'] ?? false
+                                );
+                            } else {
+                                $failed++;
+                                BatchTaskDetail::updateResult(
+                                    $task->id,
+                                    $detail->account_id,
+                                    BatchTaskDetail::STATUS_FAILED,
+                                    $result['message'],
+                                    $result['code']
+                                );
+                            }
+                            
+                            $processed++;
+                            
+                            // 更新任务进度
+                            $task->updateProgress($processed, $success, $failed);
+                        });
                         
                         // 检查任务是否被取消
                         $task->refresh();
@@ -261,16 +272,38 @@ class BatchTaskService
                         usleep(500000); // 0.5秒
                         
                     } catch (\Exception $e) {
-                        $failed++;
-                        BatchTaskDetail::updateResult(
-                            $task->id,
-                            $detail->account_id,
-                            BatchTaskDetail::STATUS_FAILED,
-                            '处理异常：' . $e->getMessage(),
-                            0
-                        );
-                        $processed++;
-                        $task->updateProgress($processed, $success, $failed);
+                        // 检查是否为数据库连接错误，如果是则重新连接并重试一次
+                        if (self::isDatabaseConnectionError($e)) {
+                            Log::warning("检测到数据库连接错误，尝试重新连接: " . $e->getMessage());
+                            self::ensureDatabaseConnection();
+                            
+                            // 重试更新结果
+                            try {
+                                $failed++;
+                                BatchTaskDetail::updateResult(
+                                    $task->id,
+                                    $detail->account_id,
+                                    BatchTaskDetail::STATUS_FAILED,
+                                    '处理异常（已重连）：' . $e->getMessage(),
+                                    0
+                                );
+                                $processed++;
+                                $task->updateProgress($processed, $success, $failed);
+                            } catch (\Exception $retryE) {
+                                Log::error("重试后仍然失败: " . $retryE->getMessage());
+                            }
+                        } else {
+                            $failed++;
+                            BatchTaskDetail::updateResult(
+                                $task->id,
+                                $detail->account_id,
+                                BatchTaskDetail::STATUS_FAILED,
+                                '处理异常：' . $e->getMessage(),
+                                0
+                            );
+                            $processed++;
+                            $task->updateProgress($processed, $success, $failed);
+                        }
                         
                         Log::error("处理账号验活异常: " . $e->getMessage(), [
                             'task_id' => $task->id,
@@ -324,10 +357,10 @@ class BatchTaskService
 
         // 调用验活API
         $result = LineApiService::verifyAccount($account->mid, $account->accesstoken, $account->proxy_url);
-        
+        Log::warning('验活API: ' . json_encode($result));
         // 如果状态为3（下线），尝试刷新Token
         $tokenRefreshed = false;
-        if ($result['code'] == 3 && !empty($account->refreshtoken)) {
+        if (in_array($result['code'], [3,5]) && !empty($account->refreshtoken)) {
             $refreshResult = LineApiService::refreshToken(
                 $account->mid,
                 $account->accesstoken,
@@ -475,5 +508,56 @@ class BatchTaskService
         }
         
         return $result;
+    }
+
+    /**
+     * 确保数据库连接正常
+     * @return void
+     */
+    private static function ensureDatabaseConnection(): void
+    {
+        try {
+            // 执行一个简单的查询来检查连接状态
+            Db::query('SELECT 1');
+        } catch (\Exception $e) {
+            // 如果连接失败，强制重新连接
+            Log::warning("数据库连接检查失败，尝试重新连接: " . $e->getMessage());
+            try {
+                // 关闭现有连接
+                Db::disconnect();
+                // 执行一个查询来触发重新连接
+                Db::query('SELECT 1');
+                Log::info("数据库重新连接成功");
+            } catch (\Exception $reconnectE) {
+                Log::error("数据库重新连接失败: " . $reconnectE->getMessage());
+                throw $reconnectE;
+            }
+        }
+    }
+
+    /**
+     * 检查异常是否为数据库连接错误
+     * @param \Exception $e
+     * @return bool
+     */
+    private static function isDatabaseConnectionError(\Exception $e): bool
+    {
+        $message = $e->getMessage();
+        $connectionErrors = [
+            'MySQL server has gone away',
+            'Lost connection to MySQL server',
+            'connection timed out',
+            'Connection reset by peer',
+            'Broken pipe',
+            'No such file or directory'
+        ];
+
+        foreach ($connectionErrors as $error) {
+            if (stripos($message, $error) !== false) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

@@ -150,3 +150,92 @@ CREATE TABLE `la_batch_task_detail` (
 - [ ] 添加批量加好友功能
 - [ ] 任务模板保存和复用
 - [ ] 邮件通知任务完成
+
+---
+
+### 2025-09-16 - 批量任务处理器MySQL连接断开修复
+
+#### 问题描述
+批量任务处理器在长时间运行过程中出现 `SQLSTATE[HY000]: General error: 2006 MySQL server has gone away` 错误，导致任务执行中断。
+
+#### 问题分析
+1. **MySQL连接超时**: MySQL服务器的 `wait_timeout` 和 `interactive_timeout` 设置为120秒（2分钟）
+2. **长时间任务**: 批量验活任务中每个账号处理间隔0.5秒，大批量任务（99个账号）总耗时约50秒，接近超时阈值
+3. **连接管理缺失**: ThinkPHP数据库配置中 `break_reconnect` 设置为 `false`，不会自动重连断开的连接
+4. **累积延迟**: 多个批次处理时，延迟累积可能超过MySQL连接超时时间
+
+#### 解决方案
+
+**1. 启用数据库自动重连**
+- 修改 `server/config/database.php`：`'break_reconnect' => true`
+
+**2. 增强批量任务处理器连接管理**
+- 在 `server/app/common/service/BatchTaskService.php` 中添加连接管理机制：
+  - 每个批次开始前检查数据库连接状态
+  - 每处理10个账号检查一次连接状态  
+  - 检测到连接错误时自动重连并重试操作
+
+**3. 新增连接管理方法**
+- `ensureDatabaseConnection()`: 检查并确保数据库连接正常
+- `isDatabaseConnectionError()`: 识别数据库连接相关异常
+
+**4. 优化事务处理**
+- 将长事务拆分为短事务，每个账号处理使用独立事务
+- 避免长时间持有数据库连接
+
+#### 技术实现细节
+
+**连接检查逻辑**:
+```php
+private static function ensureDatabaseConnection(): void
+{
+    try {
+        // 执行简单查询检查连接状态
+        Db::query('SELECT 1');
+    } catch (\Exception $e) {
+        // 连接失败时强制重新连接
+        Db::disconnect();
+        Db::query('SELECT 1'); // 触发重连
+    }
+}
+```
+
+**错误识别逻辑**:
+```php
+private static function isDatabaseConnectionError(\Exception $e): bool
+{
+    $connectionErrors = [
+        'MySQL server has gone away',
+        'Lost connection to MySQL server',
+        'connection timed out',
+        'Connection reset by peer',
+        'Broken pipe'
+    ];
+    // 检查异常消息是否包含连接错误关键词
+}
+```
+
+**批次处理优化**:
+- 每个批次开始前：执行连接检查
+- 每处理10个账号：执行连接检查  
+- 检测到连接错误：立即重连并重试当前操作
+- 使用独立事务：避免长事务导致的连接占用
+
+#### 文件变更
+- `server/config/database.php`: 启用 `break_reconnect`
+- `server/app/common/service/BatchTaskService.php`: 
+  - 添加连接管理方法
+  - 优化批次处理逻辑
+  - 增强异常处理机制
+
+#### 验证方式
+1. **连接测试**: 创建简单的PDO连接测试脚本验证基础连接功能
+2. **长时间任务测试**: 重置卡住的任务状态，验证修复后的处理器稳定性
+3. **连接断开模拟**: 手动中断数据库连接，验证自动重连机制
+4. **大批量任务**: 测试99个账号的批量验活任务完整执行
+
+#### 预期效果
+- 消除 "MySQL server has gone away" 错误
+- 提升长时间批量任务的稳定性
+- 增强系统的容错能力和自愈能力
+- 确保大规模批量操作的可靠性
