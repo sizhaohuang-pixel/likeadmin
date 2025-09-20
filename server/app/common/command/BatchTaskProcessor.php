@@ -39,7 +39,7 @@ class BatchTaskProcessor extends Command
     /**
      * 进程锁超时时间（秒）
      */
-    const LOCK_TIMEOUT = 3600;
+    const LOCK_TIMEOUT = 3600 * 12;
 
     protected function configure()
     {
@@ -85,7 +85,7 @@ class BatchTaskProcessor extends Command
      */
     private function getPendingTasks()
     {
-        return BatchTask::where('task_status', BatchTask::STATUS_PENDING)
+        return BatchTask::whereIn('task_status', [BatchTask::STATUS_PENDING, BatchTask::STATUS_RUNNING])
             ->order('create_time', 'asc')
             ->limit(5) // 限制单次处理任务数量
             ->select();
@@ -110,7 +110,7 @@ class BatchTaskProcessor extends Command
             
             // 再次检查任务状态（防止并发问题）
             $task->refresh();
-            if ($task->task_status !== BatchTask::STATUS_PENDING) {
+            if (!in_array($task->task_status, [BatchTask::STATUS_PENDING, BatchTask::STATUS_RUNNING])) {
                 $this->output->writeln("任务 {$task->id} 状态已变更为 {$task->task_status}，跳过处理");
                 return;
             }
@@ -322,3 +322,4 @@ class BatchTaskProcessor extends Command
         }
     }
 }
+

@@ -199,17 +199,24 @@ class BatchTaskService
     public static function processBatchVerifyTask(BatchTask $task): bool
     {
         try {
-            // 更新任务状态为运行中
-            if (!$task->changeStatus(BatchTask::STATUS_RUNNING)) {
+            $originalStatus = $task->task_status;
+            if ($originalStatus === BatchTask::STATUS_PENDING) {
+                if (!$task->changeStatus(BatchTask::STATUS_RUNNING)) {
+                    return false;
+                }
+            } elseif ($originalStatus !== BatchTask::STATUS_RUNNING) {
+                Log::warning("批量验活任务状态异常，无法处理: {$task->id}, 当前状态: {$originalStatus}");
                 return false;
             }
+
+            $task->refresh();
 
             Log::info("开始处理批量验活任务: {$task->id}");
 
             $batchSize = 10; // 批次大小
-            $processed = 0;
-            $success = 0;
-            $failed = 0;
+            $processed = (int)($task->processed_count ?? 0);
+            $success = (int)($task->success_count ?? 0);
+            $failed = (int)($task->failed_count ?? 0);
 
             while (true) {
                 // 检查并重新连接数据库（防止长时间运行导致连接断开）
