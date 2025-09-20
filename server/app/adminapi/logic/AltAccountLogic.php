@@ -1098,9 +1098,9 @@ class AltAccountLogic extends BaseLogic
                 $account->accesstoken,
                 $account->proxy_url
             );
-
+            
             // 如果返回状态为3（下线），尝试刷新Token
-            if ($result['code'] == 3) {
+            if (in_array($result['code'], [3,5])) {
                 // 检查是否有refreshtoken
                 if (!empty($account->refreshtoken)) {
                     $refreshResult = \app\common\service\LineApiService::refreshToken(

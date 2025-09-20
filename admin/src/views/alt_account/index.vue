@@ -570,43 +570,35 @@ const handleVerifyAccount = async (row: any) => {
         try {
             const res = await apiAltAccountVerify({ id: row.id })
             
-            // console.log('验活API返回数据:', res)
+            console.log('=== 验活API调试信息 ===')
+            console.log('完整响应对象:', res)
+            console.log('响应数据类型:', typeof res)
+            console.log('=== 调试信息结束 ===')
             
-            // 检查响应结构：res.code === 1 表示API调用成功
-            if (res.code === 1 && res.data) {
-                const { success, code, message, account_info, token_refreshed, token_refresh_failed, no_refresh_token, retried, total_attempts } = res.data
+            // res 本身就是验活结果数据
+            console.log('响应数据:', res)
+            
+            // 检查响应结构 - 直接从 res 中获取数据
+            if (res && res.success !== undefined) {
+                const { success, code, message, account_info } = res
+                
+                console.log('解析出的数据:', { success, code, message, account_info })
                 
                 if (success) {
-                    // 根据状态码和Token刷新情况显示不同颜色的消息
-                    const accountName = account_info?.nickname || account_info?.phone
+                    // 根据状态码显示不同颜色的消息
+                    const accountName = account_info?.nickname || account_info?.phone || '账号'
+                    
+                    console.log('准备显示成功消息, code:', code, 'message:', message, 'accountName:', accountName)
                     
                     switch (code) {
                         case 1: // 正常
-                            if (token_refreshed) {
-                                feedback.msgSuccess(`🔄 ${message} - ${accountName}`)
-                            } else {
-                                let successMsg = `✅ ${message} - ${accountName}`
-                                if (retried && total_attempts > 1) {
-                                    successMsg = `🔄✅ ${message} - ${accountName}`
-                                }
-                                feedback.msgSuccess(successMsg)
-                            }
+                            feedback.msgSuccess(`✅ ${message} - ${accountName}`)
                             break
                         case 2: // 代理不可用
-                            let warningMsg = `⚠️ ${message} - ${accountName}`
-                            if (retried && total_attempts > 1) {
-                                warningMsg = `🔄⚠️ ${message} - ${accountName}`
-                            }
-                            feedback.msgWarning(warningMsg)
+                            feedback.msgWarning(`⚠️ ${message} - ${accountName}`)
                             break
                         case 3: // 下线
-                            if (token_refresh_failed) {
-                                feedback.msgError(`📴 ${message} - ${accountName}`)
-                            } else if (no_refresh_token) {
-                                feedback.msgWarning(`📴 ${message} - ${accountName}`)
-                            } else {
-                                feedback.msgWarning(`📴 ${message} - ${accountName}`)
-                            }
+                            feedback.msgWarning(`📴 ${message} - ${accountName}`)
                             break
                         case 4: // 封禁
                             feedback.msgError(`❌ ${message} - ${accountName}`)
@@ -619,11 +611,14 @@ const handleVerifyAccount = async (row: any) => {
                     getLists()
                 } else {
                     // 验活失败（业务层面失败）
+                    console.log('验活失败 - success为false, message:', message)
                     feedback.msgError(message || '验活失败')
                 }
             } else {
                 // API调用失败
-                feedback.msgError(res.msg || res.message || '验活失败')
+                console.log('API调用失败 - 响应结构不正确')
+                console.log('res:', res)
+                feedback.msgError('验活失败')
             }
         } catch (apiError) {
             feedback.msgError('验活过程中发生网络错误')

@@ -73,5 +73,11 @@ export function apiAltAccountGetProxyStatistics() {
 
 // 账号验活
 export function apiAltAccountVerify(params: any) {
-    return request.post({ url: '/alt_account/verify', params })
+    return request.post({ 
+        url: '/alt_account/verify', 
+        params,
+        requestOptions: {
+            isTransformResponse: false  // 禁用响应转换，让前端完全控制消息显示
+        }
+    })
 }
