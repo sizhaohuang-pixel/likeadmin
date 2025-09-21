@@ -354,3 +354,292 @@ public static function updateAvatar(string $avatarBase64, string $mid, string $a
 - 提升用户体验，减少手动重试操作
 - 统一所有LineAPI接口的错误处理策略
 - 增强系统的稳定性和可靠性
+
+---
+
+### 2025-09-16 - 头像更新功能完整实现
+
+#### 开发内容
+基于已有的LineApiService重试机制，完成了完整的头像更新功能实现：
+
+**后端功能完善**:
+- **API接口**: `AltAccountController::updateAvatar()` 控制器方法
+- **业务逻辑**: `AltAccountLogic::updateAvatar()` 方法，包含完整的错误处理和Token刷新机制
+- **验证器修复**: 修复 `AltAccountValidate::sceneUpdateAvatar()` 方法的语法错误
+- **文件管理**: 实现头像文件保存、旧文件清理和Base64解析逻辑
+- **数据库更新**: 成功时更新数据库中的avatar字段
+
+**前端功能实现**:
+- **UI界面**: 在小号管理页面添加完整的头像更新对话框
+- **文件上传**: 支持拖拽或点击选择图片文件
+- **格式验证**: 支持JPG、PNG、JPEG格式，限制文件大小1.5MB以内
+- **实时预览**: 显示当前头像和上传进度
+- **状态反馈**: 完整的加载状态和错误提示
+
+#### 技术实现细节
+
+**后端逻辑**:
+- 使用LineApiService的updateAvatar方法（已有重试机制）
+- Token过期时自动刷新并重试
+- 支持多种图片格式的Base64解析
+- 自动生成唯一文件名避免冲突
+- 旧头像文件自动清理
+
+**前端交互**:
+- 文件选择后自动转换为Base64格式
+- 调用后端API进行头像更新
+- 成功后实时更新列表中的头像显示
+- 完整的错误处理和用户反馈
+
+**返回状态码处理**:
+- 状态码1：更新成功，保存文件并更新数据库
+- 状态码2：代理不可用，自动重试（重试机制）
+- 状态码3：Token过期，自动刷新Token并重试
+- 状态码4：账号封禁，返回错误信息
+- 状态码5：更新失败，返回失败信息
+
+#### 文件变更
+**后端**:
+- `server/app/adminapi/validate/AltAccountValidate.php`: 修复updateAvatar验证场景语法错误
+- `server/app/adminapi/logic/AltAccountLogic.php`: 头像更新业务逻辑（已完善）
+- `server/app/adminapi/controller/AltAccountController.php`: 头像更新控制器（已完善）
+
+**前端**:
+- `admin/src/views/alt_account/index.vue`: 
+  - 添加头像更新对话框UI
+  - 实现文件选择和Base64转换逻辑
+  - 集成头像更新API调用
+  - 添加完整的错误处理和状态管理
+- `admin/src/api/alt_account.ts`: 头像更新API接口（已存在）
+
+#### 使用流程
+1. 在小号管理页面点击账号操作的"更多" -> "修改头像"
+2. 在弹出的对话框中查看当前头像
+3. 点击"选择新头像"按钮选择图片文件
+4. 系统自动验证文件格式和大小
+5. 文件转换为Base64后调用后端API
+6. 后端调用LineAPI更新头像
+7. 成功后保存文件并更新数据库
+8. 前端实时更新头像显示
+
+#### 技术优势
+- **重试机制**: 继承LineApiService的代理错误重试功能
+- **容错性强**: 完整的错误处理和Token刷新机制
+- **用户体验**: 直观的UI界面和实时反馈
+- **文件管理**: 自动文件清理和路径管理
+- **格式支持**: 严格的图片格式支持（.jpg, .png, .jpeg, .JPG）和1.5MB大小限制
+
+---
+
+### 2025-09-21 - 头像更新功能最终完善
+
+#### 问题背景
+在头像更新功能的实现过程中，发现了一些需要调整的细节：
+1. 文件格式支持需要更精确的限制
+2. 文件大小限制需要调整
+3. 后端验证器存在语法错误
+4. 需要确保所有组件正确集成
+
+#### 最终完善内容
+- **文件格式限制**: 严格限制为 .jpg、.png、.jpeg、.JPG 格式
+- **文件大小限制**: 调整为最大1.5MB（而非之前的2MB）
+- **语法错误修复**: 修复 `AltAccountValidate.php` 中 `sceneUpdateAvatar()` 方法的语法错误
+- **前端验证更新**: 更新前端文件验证逻辑以匹配后端要求
+
+#### 文件变更总结
+**后端修复**:
+- `server/app/adminapi/validate/AltAccountValidate.php`: 修复语法错误，添加 `$this->` 前缀
+- `server/app/adminapi/logic/AltAccountLogic.php`: 确认命名空间导入正确，双反斜杠问题已解决
+
+**前端更新**:
+- `admin/src/views/alt_account/index.vue`: 
+  - 更新文件类型验证：`['image/jpeg', 'image/jpg', 'image/png']`
+  - 更新文件大小验证：`1.5 * 1024 * 1024` (1.5MB)
+  - 更新错误提示信息
+
+#### 功能特点
+- **完整的错误处理**: 包含文件格式、大小、网络错误等全面的错误处理
+- **自动重试机制**: 继承LineApiService的代理错误重试功能
+- **Token刷新**: 自动处理访问令牌过期情况
+- **文件管理**: 自动保存新头像并清理旧文件
+- **用户友好**: 直观的UI界面和详细的状态反馈
+
+#### 验证方式
+1. **格式验证**: 测试不支持的格式（如.gif）应被拒绝
+2. **大小验证**: 测试超过1.5MB的文件应被拒绝
+3. **成功上传**: 测试符合要求的文件能成功上传并更新
+4. **错误处理**: 测试各种API错误码的正确处理
+
+---
+
+### 2025-09-21 - 头像更新功能用户体验优化
+
+#### 问题背景
+用户反馈头像更新功能需要改进：
+1. 选择文件后应该先展示预览，再确认提交
+2. 提交给后端的base64编码需要包含完整的文件头格式
+3. 需要更好的用户交互体验
+
+#### 开发内容
+对头像更新功能进行了用户体验优化：
+
+**预览功能实现**:
+- **文件选择预览**: 选择文件后立即显示头像预览
+- **操作流程优化**: 选择 → 预览 → 确认 → 提交的清晰流程
+- **重新选择支持**: 用户可以在预览后重新选择文件
+- **内存管理**: 自动清理URL对象，避免内存泄露
+
+**Base64编码格式修正**:
+- **完整格式**: 现在发送 `data:image/xxx;base64,` 完整格式给后端
+- **格式自动识别**: 后端自动解析文件格式信息
+- **向后兼容**: 后端代码已支持带前缀和不带前缀的格式
+
+**UI界面优化**:
+- **对话框扩展**: 宽度调整为500px，容纳预览内容
+- **双头像显示**: 同时显示当前头像和新头像预览
+- **状态切换**: 根据是否有预览动态切换操作按钮
+- **操作按钮**: "确认更新"和"重新选择"按钮
+
+#### 技术实现细节
+
+**前端预览机制**:
+```javascript
+// 创建预览URL
+previewAvatarUrl.value = URL.createObjectURL(file)
+
+// 清理URL对象
+if (previewAvatarUrl.value) {
+    URL.revokeObjectURL(previewAvatarUrl.value)
+}
+```
+
+**Base64编码处理**:
+```javascript
+// 返回完整格式
+const fileToBase64 = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => {
+            const result = reader.result as string
+            resolve(result) // 包含 data:image/xxx;base64, 前缀
+        }
+        reader.readAsDataURL(file)
+    })
+}
+```
+
+**后端文件处理**:
+- 解析完整base64格式，提取文件类型信息
+- 将图片保存为实际文件到服务器磁盘
+- 数据库保存文件相对路径，不是base64编码
+- 文件路径格式：`uploads/alt_account/avatar/20250921/avatar_123_143052_5678.jpg`
+
+#### 文件变更
+**前端优化**:
+- `admin/src/views/alt_account/index.vue`:
+  - 添加预览状态变量：`previewAvatarUrl`、`selectedFile`
+  - 修改文件选择逻辑，先预览后提交
+  - 更新UI布局，支持双头像显示
+  - 添加确认提交函数：`handleConfirmAvatar()`
+  - 添加URL对象清理监听器
+
+#### 用户体验提升
+1. **直观预览**: 选择文件后立即看到效果
+2. **确认机制**: 避免误操作，用户可以预览后决定
+3. **操作灵活**: 支持重新选择，不需要关闭对话框
+4. **状态清晰**: 明确的操作流程和按钮状态
+5. **内存优化**: 自动清理临时URL对象
+
+#### 验证方式
+1. **预览功能**: 选择文件后查看预览效果
+2. **格式支持**: 测试JPG、PNG、JPEG格式文件
+3. **大小限制**: 验证1.5MB文件大小限制
+4. **操作流程**: 测试选择→预览→确认→提交的完整流程
+5. **重新选择**: 测试预览后重新选择文件的功能
+
+---
+
+### 2025-09-21 - 头像更新功能数据库溢出问题修复
+
+#### 问题背景
+用户在使用头像更新功能时遇到数据库字段溢出错误：
+```
+SQLSTATE[22001]: String data, right truncated: 1406 Data too long for column 'params' at row 1
+```
+
+经过调查发现，问题根源是系统的操作日志监听器会自动记录所有API请求参数到数据库的`la_operation_log.params`字段中，而头像更新请求包含的base64编码图片数据很容易超过MySQL TEXT字段的65KB限制。
+
+#### 开发内容
+对系统日志记录机制进行全面优化，防止大型数据导致数据库字段溢出：
+
+**核心问题修复**:
+- **操作日志监听器优化**: 修复系统级日志记录机制，防止大型数据写入数据库
+- **批量任务日志优化**: 完善批量验活任务中的日志记录安全性
+- **API服务日志清理**: 确保所有LINE API调用的日志都安全可控
+
+#### 技术实现细节
+
+**操作日志监听器优化** (`server/app/adminapi/listener/OperationLog.php`):
+```php
+// 过滤头像base64参数
+if (isset($params['avatar']) && strlen($params['avatar']) > 1000) {
+    $params['avatar'] = "头像数据已过滤(长度:" . strlen($params['avatar']) . "字符)";
+}
+
+// 获取响应内容并限制大小
+$responseContent = $response->getContent();
+if (strlen($responseContent) > 65000) {
+    $responseContent = "响应内容过大已截断(原长度:" . strlen($responseContent) . "字符):" . substr($responseContent, 0, 65000);
+}
+```
+
+**批量任务服务优化** (`server/app/common/service/BatchTaskService.php`):
+```php
+// 记录验活结果，但排除可能的大型数据
+$logResult = $result;
+if (isset($logResult['data']) && is_array($logResult['data'])) {
+    foreach ($logResult['data'] as $key => $value) {
+        if (is_string($value) && strlen($value) > 1000) {
+            $logResult['data'][$key] = "数据过长已过滤(长度:" . strlen($value) . "字符)";
+        }
+    }
+}
+```
+
+**LINE API服务完善** (`server/app/common/service/LineApiService.php`):
+- 确认所有日志记录位置都已优化，避免记录完整base64数据
+- 统一使用数据大小描述替代实际内容
+
+#### 文件变更总结
+**后端修复**:
+- `server/app/adminapi/listener/OperationLog.php`: 系统级操作日志记录优化
+  - 添加头像参数过滤机制
+  - 添加响应内容大小限制
+  - 确保所有记录的数据都在数据库字段限制范围内
+- `server/app/common/service/BatchTaskService.php`: 批量任务日志安全优化
+  - 验活API结果记录时过滤大型数据
+  - 防止任务处理过程中的日志溢出
+- `server/app/common/service/LineApiService.php`: API服务日志记录完善
+  - 所有API调用的日志记录都已安全化
+  - 统一的大型数据处理策略
+
+#### 问题解决机制
+1. **数据大小检测**: 对所有可能包含大型数据的参数进行长度检查
+2. **智能替换**: 超过阈值的数据用描述信息替代，保留调试所需的关键信息
+3. **分层防护**: 在多个层级（操作日志、API服务、批量任务）都添加保护机制
+4. **向后兼容**: 修复不影响现有功能，只优化日志记录方式
+
+#### 验证方式
+1. **头像更新测试**: 上传各种大小的图片文件，确认不再出现数据库溢出错误
+2. **日志记录检查**: 验证操作日志中的参数记录是否已正确过滤
+3. **批量任务测试**: 确认批量验活等任务的日志记录安全性
+4. **系统稳定性**: 验证修复后系统整体运行稳定
+
+#### 预期效果
+- **彻底解决数据库溢出**: 无论上传多大的头像文件都不会导致数据库字段溢出
+- **保持调试能力**: 日志中仍然记录关键信息，便于问题排查
+- **系统性解决**: 不仅解决头像问题，还预防了其他可能的大型数据溢出问题
+- **性能优化**: 减少不必要的大型数据写入，提升系统性能
+
+#### 技术价值
+这次修复不仅解决了当前的头像更新问题，更重要的是建立了系统级的大型数据处理机制，为未来可能出现的类似问题提供了完整的解决方案。通过在多个层级添加防护措施，确保了系统的健壮性和可维护性。

@@ -364,7 +364,17 @@ class BatchTaskService
 
         // 调用验活API
         $result = LineApiService::verifyAccount($account->mid, $account->accesstoken, $account->proxy_url);
-        Log::warning('验活API: ' . json_encode($result));
+        
+        // 记录验活结果，但排除可能的大型数据
+        $logResult = $result;
+        if (isset($logResult['data']) && is_array($logResult['data'])) {
+            foreach ($logResult['data'] as $key => $value) {
+                if (is_string($value) && strlen($value) > 1000) {
+                    $logResult['data'][$key] = "数据过长已过滤(长度:" . strlen($value) . "字符)";
+                }
+            }
+        }
+        Log::warning('验活API: ' . json_encode($logResult));
         // 如果状态为3（下线），尝试刷新Token
         $tokenRefreshed = false;
         if (in_array($result['code'], [3,5]) && !empty($account->refreshtoken)) {

@@ -23,6 +23,7 @@ use app\common\model\auth\AdminRole;
 use app\common\logic\BaseLogic;
 use app\common\service\AdminHierarchyService;
 use app\common\service\PortStatisticsService;
+use app\common\service\FileService;
 use app\common\model\package\AltAccountAssignment;
 use think\facade\Db;
 
@@ -730,7 +731,6 @@ class AltAccountLogic extends BaseLogic
 
             // 执行批量导入
             return self::executeBatchImport($importData, $params['group_id'], $currentAdminId, $result);
-
         } catch (\Exception $e) {
             self::setError('批量导入异常: ' . $e->getMessage() . ' 文件: ' . $e->getFile() . ' 行号: ' . $e->getLine());
             $result['errors'][] = [
@@ -853,7 +853,6 @@ class AltAccountLogic extends BaseLogic
 
             Db::commit();
             return $result;
-
         } catch (\Exception $e) {
             Db::rollback();
             self::setError($e->getMessage());
@@ -1036,11 +1035,174 @@ class AltAccountLogic extends BaseLogic
      * @author 段誉
      * @date 2025/09/08
      */
+
+    /**
+     * @notes 修改昵称
+     * @param array $params
+     * @param int $currentAdminId
+     * @return array
+     */
+    public static function updateNickname(array $params, int $currentAdminId = 0): array
+    {
+        try {
+            $accountId = (int)($params['id'] ?? 0);
+            $newNickname = trim((string)($params['nickname'] ?? ''));
+
+            if ($accountId <= 0) {
+                return [
+                    'success' => false,
+                    'message' => '参数错误: 缺少小号ID'
+                ];
+            }
+
+            if ($newNickname === '') {
+                return [
+                    'success' => false,
+                    'message' => '昵称不能为空'
+                ];
+            }
+
+            $account = AltAccount::findOrEmpty($accountId);
+            if ($account->isEmpty()) {
+                return [
+                    'success' => false,
+                    'message' => '小号不存在'
+                ];
+            }
+
+            $adminInfo = Admin::findOrEmpty($currentAdminId);
+            if ($adminInfo->isEmpty()) {
+                return [
+                    'success' => false,
+                    'message' => '当前用户无效'
+                ];
+            }
+
+            if ($adminInfo->root != 1 && $account->tenant_id != $currentAdminId) {
+                return [
+                    'success' => false,
+                    'message' => '没有权限操作该小号'
+                ];
+            }
+
+            if (empty($account->mid)) {
+                return [
+                    'success' => false,
+                    'message' => '账号MID不能为空'
+                ];
+            }
+
+            if (empty($account->accesstoken)) {
+                return [
+                    'success' => false,
+                    'message' => '访问令牌不能为空'
+                ];
+            }
+
+            if (empty($account->proxy_url)) {
+                return [
+                    'success' => false,
+                    'message' => '代理地址不能为空'
+                ];
+            }
+
+            $result = \app\common\service\LineApiService::updateNickname(
+                $newNickname,
+                $account->mid,
+                $account->accesstoken,
+                $account->proxy_url
+            );
+
+            $tokenRefreshed = false;
+
+            if (($result['code'] ?? 0) === 3) {
+                if (!empty($account->refreshtoken)) {
+                    $refreshResult = \app\common\service\LineApiService::refreshToken(
+                        $account->mid,
+                        $account->accesstoken,
+                        $account->refreshtoken,
+                        $account->proxy_url
+                    );
+
+                    if ($refreshResult['success'] ?? false) {
+                        $account->accesstoken = $refreshResult['data']['accessToken'] ?? $account->accesstoken;
+                        $account->refreshtoken = $refreshResult['data']['refreshToken'] ?? $account->refreshtoken;
+                        $account->save();
+
+                        $tokenRefreshed = true;
+
+                        $result = \app\common\service\LineApiService::updateNickname(
+                            $newNickname,
+                            $account->mid,
+                            $account->accesstoken,
+                            $account->proxy_url
+                        );
+                    } else {
+                        return [
+                            'success' => false,
+                            'message' => 'Token刷新失败：' . ($refreshResult['message'] ?? ''),
+                            'code' => $refreshResult['code'] ?? 0,
+                            'status' => $refreshResult['status'] ?? '',
+                            'mid' => $account->mid,
+                            'token_refresh_failed' => true
+                        ];
+                    }
+                } else {
+                    return [
+                        'success' => false,
+                        'message' => '缺少RefreshToken，无法刷新AccessToken',
+                        'code' => $result['code'],
+                        'status' => $result['status'] ?? '',
+                        'mid' => $account->mid,
+                        'no_refresh_token' => true
+                    ];
+                }
+            }
+
+            if (!($result['success'] ?? false)) {
+                $code = $result['code'] ?? 0;
+                $messageMap = [
+                    2 => '代理不可用，无法更新昵称',
+                    3 => 'AccessToken已过期，请刷新后重试',
+                    4 => '账号已封禁，无法更新昵称',
+                ];
+                $message = $messageMap[$code] ?? ($result['message'] ?? '昵称更新失败');
+
+                return [
+                    'success' => false,
+                    'message' => $message,
+                    'code' => $code,
+                    'status' => $result['status'] ?? '',
+                    'mid' => $result['mid'] ?? $account->mid,
+                    'token_refreshed' => $tokenRefreshed
+                ];
+            }
+
+            $account->nickname = $newNickname;
+            $account->save();
+
+            return [
+                'success' => true,
+                'message' => '昵称更新成功',
+                'code' => $result['code'] ?? 1,
+                'status' => $result['status'] ?? '',
+                'mid' => $result['mid'] ?? $account->mid,
+                'nickname' => $newNickname,
+                'token_refreshed' => $tokenRefreshed
+            ];
+        } catch (\Exception $e) {
+            return [
+                'success' => false,
+                'message' => '修改昵称时发生异常：' . $e->getMessage()
+            ];
+        }
+    }
+
     public static function verify(array $params, int $currentAdminId = 0): array
     {
         try {
             $accountId = $params['id'];
-            
+
             // 查询账号信息
             $account = AltAccount::findOrEmpty($accountId);
             if ($account->isEmpty()) {
@@ -1098,9 +1260,9 @@ class AltAccountLogic extends BaseLogic
                 $account->accesstoken,
                 $account->proxy_url
             );
-            
+
             // 如果返回状态为3（下线），尝试刷新Token
-            if (in_array($result['code'], [3,5])) {
+            if (in_array($result['code'], [3, 5])) {
                 // 检查是否有refreshtoken
                 if (!empty($account->refreshtoken)) {
                     $refreshResult = \app\common\service\LineApiService::refreshToken(
@@ -1161,7 +1323,6 @@ class AltAccountLogic extends BaseLogic
                 ],
                 'updated_status' => $newStatus // 返回更新后的状态
             ];
-
         } catch (\Exception $e) {
             return [
                 'success' => false,
@@ -1193,5 +1354,240 @@ class AltAccountLogic extends BaseLogic
             default:
                 return null; // 未知状态不更新
         }
+    }
+
+    /**
+     * @notes 更新头像
+     * @param array $params
+     * @param int $currentAdminId
+     * @return array
+     */
+    public static function updateAvatar(array $params, int $currentAdminId = 0): array
+    {
+        try {
+            $accountId = (int)($params['id'] ?? 0);
+            $avatarBase64 = trim((string)($params['avatar'] ?? ''));
+
+            if ($accountId <= 0) {
+                return [
+                    'success' => false,
+                    'message' => '参数错误: 缺少小号ID'
+                ];
+            }
+
+            if ($avatarBase64 === '') {
+                return [
+                    'success' => false,
+                    'message' => '头像数据不能为空'
+                ];
+            }
+
+            $account = AltAccount::findOrEmpty($accountId);
+            if ($account->isEmpty()) {
+                return [
+                    'success' => false,
+                    'message' => '小号不存在'
+                ];
+            }
+
+            $adminInfo = Admin::findOrEmpty($currentAdminId);
+            if ($adminInfo->isEmpty()) {
+                return [
+                    'success' => false,
+                    'message' => '当前用户无效'
+                ];
+            }
+
+            if ($adminInfo->root != 1 && $account->tenant_id != $currentAdminId) {
+                return [
+                    'success' => false,
+                    'message' => '没有权限操作该小号'
+                ];
+            }
+
+            if (empty($account->mid)) {
+                return [
+                    'success' => false,
+                    'message' => '账号MID不能为空'
+                ];
+            }
+
+            if (empty($account->accesstoken)) {
+                return [
+                    'success' => false,
+                    'message' => '访问令牌不能为空'
+                ];
+            }
+
+            if (empty($account->proxy_url)) {
+                return [
+                    'success' => false,
+                    'message' => '代理地址不能为空'
+                ];
+            }
+
+            $result = \app\common\service\LineApiService::updateAvatar(
+                $avatarBase64,
+                $account->mid,
+                $account->accesstoken,
+                $account->proxy_url
+            );
+
+            $tokenRefreshed = false;
+
+            if (($result['code'] ?? 0) === 3) {
+                if (!empty($account->refreshtoken)) {
+                    $refreshResult = \app\common\service\LineApiService::refreshToken(
+                        $account->mid,
+                        $account->accesstoken,
+                        $account->refreshtoken,
+                        $account->proxy_url
+                    );
+
+                    if ($refreshResult['success'] ?? false) {
+                        $account->accesstoken = $refreshResult['data']['accessToken'] ?? $account->accesstoken;
+                        $account->refreshtoken = $refreshResult['data']['refreshToken'] ?? $account->refreshtoken;
+                        $account->save();
+
+                        $tokenRefreshed = true;
+
+                        $result = \app\common\service\LineApiService::updateAvatar(
+                            $avatarBase64,
+                            $account->mid,
+                            $account->accesstoken,
+                            $account->proxy_url
+                        );
+                    } else {
+                        return [
+                            'success' => false,
+                            'message' => 'Token刷新失败：' . ($refreshResult['message'] ?? ''),
+                            'code' => $refreshResult['code'] ?? 0,
+                            'status' => $refreshResult['status'] ?? '',
+                            'mid' => $account->mid,
+                            'token_refresh_failed' => true
+                        ];
+                    }
+                } else {
+                    return [
+                        'success' => false,
+                        'message' => '缺少RefreshToken，无法刷新AccessToken',
+                        'code' => $result['code'] ?? 3,
+                        'status' => $result['status'] ?? '',
+                        'mid' => $account->mid,
+                        'no_refresh_token' => true
+                    ];
+                }
+            }
+
+            if (!($result['success'] ?? false)) {
+                $code = $result['code'] ?? 0;
+                $messageMap = [
+                    2 => '代理不可用，无法更新头像',
+                    3 => 'AccessToken已过期，请刷新后重试',
+                    4 => '账号已封禁，无法更新头像',
+                    5 => '头像更新失败'
+                ];
+                $message = $messageMap[$code] ?? ($result['message'] ?? '头像更新失败');
+
+                return [
+                    'success' => false,
+                    'message' => $message,
+                    'code' => $code,
+                    'status' => $result['status'] ?? '',
+                    'mid' => $result['mid'] ?? $account->mid,
+                    'token_refreshed' => $tokenRefreshed
+                ];
+            }
+
+            $avatarInfo = self::saveAvatarFromBase64($avatarBase64, $account);
+            $oldAvatarPath = trim((string)$account->avatar);
+            $account->avatar = $avatarInfo['path'];
+            $account->save();
+
+            if ($oldAvatarPath && $oldAvatarPath !== $avatarInfo['path']) {
+                $oldFile = rtrim(public_path(), DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $oldAvatarPath);
+                if (is_file($oldFile)) {
+                    @unlink($oldFile);
+                }
+            }
+
+            return [
+                'success' => true,
+                'message' => '头像更新成功',
+                'code' => $result['code'] ?? 1,
+                'status' => $result['status'] ?? '',
+                'mid' => $result['mid'] ?? $account->mid,
+                'avatar_path' => $avatarInfo['path'],
+                'avatar_url' => $avatarInfo['url'],
+                'token_refreshed' => $tokenRefreshed
+            ];
+        } catch (\Exception $e) {
+            return [
+                'success' => false,
+                'message' => '修改头像时发生异常：' . $e->getMessage()
+            ];
+        }
+    }
+
+    /**
+     * @notes 保存头像文件
+     * @param string $avatarBase64 图片Base64
+     * @param AltAccount $account
+     * @return array
+     */
+    private static function saveAvatarFromBase64(string $avatarBase64, AltAccount $account): array
+    {
+        $base64Data = $avatarBase64;
+        $extension = 'png';
+
+        if (stripos($base64Data, 'base64,') !== false) {
+            $commaPos = strpos($base64Data, ',');
+            $header = substr($base64Data, 0, $commaPos);
+            $base64Data = substr($base64Data, $commaPos + 1);
+
+            if (preg_match('/data:image\\/(\w+);base64/', $header, $matches)) {
+                $extension = strtolower($matches[1]);
+            }
+        }
+
+        $extensionMap = [
+            'jpeg' => 'jpg'
+        ];
+        if (isset($extensionMap[$extension])) {
+            $extension = $extensionMap[$extension];
+        }
+
+        if (!in_array($extension, ['jpg', 'png', 'gif', 'webp'], true)) {
+            throw new \Exception('不支持的图片格式');
+        }
+
+        $base64Data = str_replace([' ', "\r", "\n"], '', $base64Data);
+        $binaryData = base64_decode($base64Data);
+        if ($binaryData === false || $binaryData === '') {
+            throw new \Exception('头像数据解析失败');
+        }
+
+        $relativeDir = 'uploads/alt_account/avatar/' . date('Ymd');
+        $absoluteDir = rtrim(public_path(), DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $relativeDir);
+
+        if (!is_dir($absoluteDir)) {
+            if (!@mkdir($absoluteDir, 0755, true) && !is_dir($absoluteDir)) {
+                throw new \Exception('头像目录创建失败');
+            }
+        }
+
+        $fileName = 'avatar_' . $account->id . '_' . date('His') . '_' . mt_rand(1000, 9999) . '.' . $extension;
+        $absolutePath = $absoluteDir . DIRECTORY_SEPARATOR . $fileName;
+
+        if (file_put_contents($absolutePath, $binaryData) === false) {
+            throw new \Exception('头像文件保存失败');
+        }
+
+        $relativePath = $relativeDir . '/' . $fileName;
+
+        return [
+            'path' => $relativePath,
+            'url' => FileService::getFileUrl($relativePath)
+        ];
     }
 }

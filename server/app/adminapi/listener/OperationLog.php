@@ -59,6 +59,10 @@ class OperationLog
         if (isset($params['file_content'])) {
             $params['file_content'] = "文件内容已过滤(长度:" . strlen($params['file_content']) . "字符)";
         }
+        //过滤头像base64参数
+        if (isset($params['avatar']) && strlen($params['avatar']) > 1000) {
+            $params['avatar'] = "头像数据已过滤(长度:" . strlen($params['avatar']) . "字符)";
+        }
 
         //导出数据操作进行记录
         if (isset($params['export']) && $params['export'] == 2) {
@@ -75,7 +79,14 @@ class OperationLog
         $systemLog->type = $request->isGet() ? 'GET' : 'POST';
         $systemLog->params = json_encode($params, true);
         $systemLog->ip = $request->ip();
-        $systemLog->result = $response->getContent();
+        
+        // 获取响应内容并限制大小
+        $responseContent = $response->getContent();
+        if (strlen($responseContent) > 65000) {
+            $responseContent = "响应内容过大已截断(原长度:" . strlen($responseContent) . "字符):" . substr($responseContent, 0, 65000);
+        }
+        $systemLog->result = $responseContent;
+        
         return $systemLog->save();
     }
 }

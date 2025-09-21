@@ -25,6 +25,7 @@
 |------|------|----------|----------|
 | [📋 任务管理](docs/development-logs/2025/09-task-management.md) | 批量任务处理系统，异步执行各类批量操作 | ~15KB | 2025-09-08 |
 | [👤 小号管理](docs/development-logs/2025/09-alt-account.md) | 小号账户完整生命周期管理系统 | ~12KB | 2025-09-08 |
+| [📝 昵称仓库](docs/development-logs/2025/09-nickname-repository.md) | 昵称分组管理、批量导入、UTF-8编码支持 | ~25KB | 2025-09-21 |
 | [🔌 用户端口](docs/development-logs/2025/09-user-port.md) | 用户端口分配、管理和监控系统 | ~3KB | 2025-09-05 |
 | [🏗️ 基础架构](docs/development-logs/2025/09-infrastructure.md) | 权限系统、中间件等核心功能 | ~2KB | 2025-09-03 |
 | [🗄️ 数据库优化](docs/development-logs/2025/09-database.md) | 数据库结构优化、性能调优 | ~2KB | 2025-09-08 |
@@ -34,11 +35,13 @@
 #### 已完成功能 ✅
 - **任务管理模块**: 批量验活系统实现，支持异步任务处理
 - **小号管理系统**: 完整的CRUD、权限控制、批量操作功能
+- **昵称仓库系统**: 分组管理、批量导入、UTF-8编码、20字符限制
 - **用户端口管理**: 端口分配、套餐关联功能
 - **基础架构**: 三级权限系统、数据隔离机制
 - **数据库优化**: 索引优化、查询性能提升
 
 #### 计划中功能 🚧
+- 昵称仓库租户权限优化
 - 批量昵称修改功能
 - 批量头像更换功能
 - 任务模板保存和复用
@@ -52,6 +55,7 @@
 ### 💡 快速导航
 - 🔍 需要了解验活功能？查看 → [小号管理模块](docs/development-logs/2025/09-alt-account.md#小号验活逻辑完善和状态管理)
 - ⚡ 需要了解批量任务？查看 → [任务管理模块](docs/development-logs/2025/09-task-management.md#任务管理模块批量验活系统实现)
+- 📝 需要了解昵称仓库？查看 → [昵称仓库模块](docs/development-logs/2025/09-nickname-repository.md#昵称仓库功能完整实现)
 - 🔐 需要了解权限系统？查看 → [基础架构模块](docs/development-logs/2025/09-infrastructure.md#基础架构搭建和权限系统完善)
 - 🚀 需要了解性能优化？查看 → [数据库优化模块](docs/development-logs/2025/09-database.md#数据库结构优化和索引调整)
 

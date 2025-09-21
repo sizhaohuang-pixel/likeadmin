@@ -269,6 +269,39 @@ class AltAccountController extends BaseAdminController
      * @author 段誉
      * @date 2025/09/08
      */
+
+    /**
+     * @notes 修改昵称
+     * @return \think\response\Json
+     */
+    public function updateNickname()
+    {
+        $params = (new AltAccountValidate())->post()->goCheck('updateNickname');
+        $result = AltAccountLogic::updateNickname($params, $this->adminId);
+
+        if (isset($result['success']) && $result['success']) {
+            return $this->success('修改成功', $result, 1, 1);
+        }
+
+        return $this->fail($result['message'] ?? '修改失败');
+    }
+
+    /**
+     * @notes 修改头像
+     * @return \think\response\Json
+     */
+    public function updateAvatar()
+    {
+        $params = (new AltAccountValidate())->post()->goCheck('updateAvatar');
+        $result = AltAccountLogic::updateAvatar($params, $this->adminId);
+
+        if (isset($result['success']) && $result['success']) {
+            return $this->success('修改成功', $result, 1, 1);
+        }
+
+        return $this->fail($result['message'] ?? '修改失败');
+    }
+
     public function verify()
     {
         $params = (new AltAccountValidate())->post()->goCheck('verify');
@@ -283,3 +316,4 @@ class AltAccountController extends BaseAdminController
 
 
 }
+

@@ -218,9 +218,18 @@ class LineApiService
         curl_close($ch);
 
         if ($response === false || !empty($error)) {
+            // 记录错误日志时，如果data包含大量数据则截断
+            $logData = $data;
+            if (is_array($logData) && isset($logData['Avatar']) && strlen($logData['Avatar']) > 100) {
+                $logData['Avatar'] = '[BASE64_DATA_' . strlen($logData['Avatar']) . '_BYTES]';
+            }
+            if (is_array($logData) && isset($logData['accessToken']) && strlen($logData['accessToken']) > 50) {
+                $logData['accessToken'] = substr($logData['accessToken'], 0, 20) . '...';
+            }
+
             \think\facade\Log::error('LINE API请求失败', [
                 'url' => $url,
-                'data' => $data,
+                'data' => $logData,
                 'error' => $error,
                 'http_code' => $httpCode
             ]);
@@ -228,9 +237,18 @@ class LineApiService
         }
 
         if ($httpCode !== 200) {
+            // 记录错误日志时，如果data包含大量数据则截断
+            $logData = $data;
+            if (is_array($logData) && isset($logData['Avatar']) && strlen($logData['Avatar']) > 100) {
+                $logData['Avatar'] = '[BASE64_DATA_' . strlen($logData['Avatar']) . '_BYTES]';
+            }
+            if (is_array($logData) && isset($logData['accessToken']) && strlen($logData['accessToken']) > 50) {
+                $logData['accessToken'] = substr($logData['accessToken'], 0, 20) . '...';
+            }
+
             \think\facade\Log::error('LINE API返回非200状态码', [
                 'url' => $url,
-                'data' => $data,
+                'data' => $logData,
                 'http_code' => $httpCode,
                 'response' => $response
             ]);
@@ -287,9 +305,9 @@ class LineApiService
                     'mid' => $mid,
                     'accessToken' => $accessToken
                 ];
-                \think\facade\Log::info('LINE API昵称更新:' . json_encode($payload));
-                $response = self::sendRequest(self::API_URL, $payload);
 
+                $response = self::sendRequest(self::API_URL, $payload);
+                \think\facade\Log::info('LINE API更新昵称:' . $response);
                 if ($response === false) {
                     $lastResult = [
                         'success' => false,
@@ -411,6 +429,7 @@ class LineApiService
 
                 $response = self::sendRequest(self::API_URL, $payload);
 
+                \think\facade\Log::info('LINE API更新头像:' . $response);
                 if ($response === false) {
                     $lastResult = [
                         'success' => false,

@@ -71,6 +71,30 @@ export function apiAltAccountGetProxyStatistics() {
     return request.get({ url: '/alt_account/getProxyStatistics' })
 }
 
+
+// 修改昵称
+export function apiAltAccountUpdateNickname(params: any) {
+    return request.post({
+        url: '/alt_account/updateNickname',
+        params,
+        requestOptions: {
+            isTransformResponse: false
+        }
+    })
+}
+
+
+// 修改头像
+export function apiAltAccountUpdateAvatar(params: any) {
+    return request.post({
+        url: '/alt_account/updateAvatar',
+        params,
+        requestOptions: {
+            isTransformResponse: false
+        }
+    })
+}
+
 // 账号验活
 export function apiAltAccountVerify(params: any) {
     return request.post({ 

@@ -38,6 +38,10 @@ class AltAccountValidate extends BaseValidate
         'password' => 'max:255',
         'mid' => 'require',
         'uid' => 'max:64',
+        'nickname' => 'require|max:32',
+        'avatar' => 'require',
+        'platform'|        'nickname' => 'require|max:32',
+        'avatar' => 'require',
         'platform' => 'max:20',
         'accesstoken' => 'require',
         'refreshtoken' => 'require',
@@ -60,6 +64,8 @@ class AltAccountValidate extends BaseValidate
         'password' => '密码',
         'mid' => '系统ID',
         'uid' => '自定义ID',
+        'nickname' => '�ǳ�',
+        'avatar' => '头像',
         'platform' => '系统平台',
         'accesstoken' => 'accesstoken',
         'refreshtoken' => 'refreshtoken',
@@ -218,6 +224,24 @@ class AltAccountValidate extends BaseValidate
     }
 
     /**
+     * @notes 更新昵称验证
+     * @return AltAccountValidate
+     */
+    public function sceneUpdateNickname()
+    {
+        return $this->only(['id', 'nickname']);
+    }
+
+    /**
+     * @notes 更新头像验证
+     * @return AltAccountValidate
+     */
+    public function sceneUpdateAvatar()
+    {
+        return $this->only(['id', 'avatar']);
+    }
+
+    /**
      * @notes 自定义验证规则：检查代理URL格式
      * @param $value
      * @param $rule
@@ -241,3 +265,5 @@ class AltAccountValidate extends BaseValidate
     }
 
 }
+
+
