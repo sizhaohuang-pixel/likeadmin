@@ -307,7 +307,7 @@ class LineApiService
                 ];
 
                 $response = self::sendRequest(self::API_URL, $payload);
-                \think\facade\Log::info('LINE API更新昵称:' . $response);
+
                 if ($response === false) {
                     $lastResult = [
                         'success' => false,
@@ -430,6 +430,7 @@ class LineApiService
                 $response = self::sendRequest(self::API_URL, $payload);
 
                 \think\facade\Log::info('LINE API更新头像:' . $response);
+
                 if ($response === false) {
                     $lastResult = [
                         'success' => false,

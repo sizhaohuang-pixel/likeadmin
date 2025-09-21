@@ -243,48 +243,28 @@
         <el-dialog 
             v-model="avatarDialogVisible" 
             title="修改头像" 
-            width="500px"
+            width="600px"
             :close-on-click-modal="false"
         >
             <div class="text-center">
-                <div class="mb-4">
-                    <p class="text-gray-600 mb-2">当前头像：</p>
-                    <el-image 
-                        v-if="currentAvatarAccount?.avatar" 
-                        :src="currentAvatarAccount.avatar" 
-                        style="width: 120px; height: 120px; border-radius: 8px;"
-                        fit="cover"
-                    />
-                    <div v-else class="w-30 h-30 border-2 border-dashed border-gray-300 flex items-center justify-center rounded-lg">
-                        <span class="text-gray-500">暂无头像</span>
-                    </div>
-                </div>
+                <!-- 图片裁剪组件 -->
+                <image-cropper 
+                    v-if="!croppedImageFile"
+                    @cropped="handleCroppedImage"
+                    @cancel="closeAvatarDialog"
+                />
                 
-                <!-- 预览新头像 -->
-                <div v-if="previewAvatarUrl" class="mb-4">
+                <!-- 显示新头像预览 -->
+                <div v-else class="mb-4">
                     <p class="text-gray-600 mb-2">新头像预览：</p>
                     <el-image 
-                        :src="previewAvatarUrl" 
-                        style="width: 120px; height: 120px; border-radius: 8px;"
+                        :src="croppedImagePreview" 
+                        style="width: 280px; height: 280px; border-radius: 8px; margin: 0 auto;"
                         fit="cover"
                     />
-                </div>
-                
-                <div class="mb-4">
-                    <el-button 
-                        type="primary" 
-                        @click="handleAvatarFileSelect"
-                        :loading="isUpdatingAvatar"
-                        v-if="!previewAvatarUrl"
-                    >
-                        <template #icon>
-                            <icon name="el-icon-Upload" />
-                        </template>
-                        选择新头像
-                    </el-button>
                     
                     <!-- 预览状态下的操作按钮 -->
-                    <div v-else class="space-x-2">
+                    <div class="mt-4 space-x-2">
                         <el-button 
                             type="success" 
                             @click="handleConfirmAvatar"
@@ -296,37 +276,23 @@
                             确认更新
                         </el-button>
                         <el-button 
-                            @click="handleAvatarFileSelect"
+                            @click="handleReselect"
                             :disabled="isUpdatingAvatar"
                         >
                             重新选择
                         </el-button>
                     </div>
                 </div>
-                
-                <div class="text-xs text-gray-500">
-                    <p>支持 JPG、PNG、JPEG 格式</p>
-                    <p>文件大小不超过 1.5MB</p>
-                </div>
             </div>
             
             <template #footer>
                 <div class="dialog-footer">
-                    <el-button @click="avatarDialogVisible = false" :disabled="isUpdatingAvatar">
+                    <el-button @click="closeAvatarDialog" :disabled="isUpdatingAvatar">
                         取消
                     </el-button>
                 </div>
             </template>
         </el-dialog>
-        
-        <!-- 隐藏的文件输入 -->
-        <input 
-            ref="avatarFileInput"
-            type="file" 
-            accept="image/jpeg,image/jpg,image/png,image/gif,image/webp"
-            style="display: none;"
-            @change="handleAvatarFileChange"
-        />
     </div>
 </template>
 
@@ -342,6 +308,7 @@ import AssignCustomerServicePopup from './assign-customer-service.vue'
 import SetGroupPopup from './set-group.vue'
 import SetProxyPopup from './set-proxy.vue'
 import ImportAccountPopup from './ImportAccountPopup.vue'
+import ImageCropper from '@/components/image-cropper/index.vue'
 import { apiAltAccountGroupGetGroupOptions } from '@/api/alt_account_group'
 import useUserStore from '@/stores/modules/user'
 
@@ -800,64 +767,44 @@ const handleEditNickname = async (row: any) => {
 // 修改头像
 const avatarDialogVisible = ref(false)
 const currentAvatarAccount = ref<any>(null)
-const avatarFileInput = ref<HTMLInputElement | null>(null)
 const isUpdatingAvatar = ref(false)
-const previewAvatarUrl = ref<string>('')
-const selectedFile = ref<File | null>(null)
+const croppedImageFile = ref<File | null>(null)
+const croppedImagePreview = ref<string>('')
 
 const handleEditAvatar = (row: any) => {
+    console.log('点击修改头像，账号信息:', row)
     currentAvatarAccount.value = row
-    previewAvatarUrl.value = ''
-    selectedFile.value = null
+    croppedImageFile.value = null
+    croppedImagePreview.value = ''
+    console.log('显示头像对话框')
     avatarDialogVisible.value = true
 }
 
-const handleAvatarFileSelect = () => {
-    avatarFileInput.value?.click()
+// 处理裁剪完成的图片
+const handleCroppedImage = (file: File) => {
+    croppedImageFile.value = file
+    croppedImagePreview.value = URL.createObjectURL(file)
 }
 
-const handleAvatarFileChange = async (event: Event) => {
-    const target = event.target as HTMLInputElement
-    const file = target.files?.[0]
-    
-    if (!file) return
-    
-    // 验证文件类型
-    const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png']
-    if (!allowedTypes.includes(file.type)) {
-        feedback.msgError('只支持 JPG、PNG、JPEG 格式的图片')
-        return
+// 重新选择图片
+const handleReselect = () => {
+    // 清理之前的预览
+    if (croppedImagePreview.value) {
+        URL.revokeObjectURL(croppedImagePreview.value)
     }
-    
-    // 验证文件大小（限制在1.5MB以内）
-    if (file.size > 1.5 * 1024 * 1024) {
-        feedback.msgError('图片大小不能超过1.5MB')
-        return
-    }
-    
-    try {
-        // 保存选中的文件
-        selectedFile.value = file
-        
-        // 创建预览URL
-        previewAvatarUrl.value = URL.createObjectURL(file)
-    } catch (error: any) {
-        feedback.msgError(error?.message || '文件处理失败')
-    } finally {
-        // 清空文件输入
-        if (target) {
-            target.value = ''
-        }
-    }
+    croppedImageFile.value = null
+    croppedImagePreview.value = ''
 }
 
-const fileToBase64 = (file: File): Promise<string> => {
+// 将文件转换为base64，但不包含data:image/xxx;base64,前缀
+const fileToBase64WithoutPrefix = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
         const reader = new FileReader()
         reader.onload = () => {
             const result = reader.result as string
-            // 返回完整的base64格式，包含data:image/xxx;base64,前缀
-            resolve(result)
+            // 移除data:image/xxx;base64,前缀，只保留base64编码部分
+            const base64WithoutPrefix = result.split(',')[1]
+            resolve(base64WithoutPrefix)
         }
         reader.onerror = () => reject(new Error('文件读取失败'))
         reader.readAsDataURL(file)
@@ -866,14 +813,14 @@ const fileToBase64 = (file: File): Promise<string> => {
 
 // 确认提交头像
 const handleConfirmAvatar = async () => {
-    if (!selectedFile.value) {
-        feedback.msgError('请先选择头像文件')
+    if (!croppedImageFile.value) {
+        feedback.msgError('请先选择并裁剪头像')
         return
     }
     
     try {
-        // 转换为base64
-        const base64 = await fileToBase64(selectedFile.value)
+        // 转换为不带前缀的base64
+        const base64 = await fileToBase64WithoutPrefix(croppedImageFile.value)
         
         // 提交头像更新
         await updateAccountAvatar(base64)
@@ -902,14 +849,7 @@ const updateAccountAvatar = async (avatarBase64: string) => {
                 pager.lists[accountIndex].avatar = data.data?.avatar_url || pager.lists[accountIndex].avatar
             }
             
-            // 清理预览状态
-            if (previewAvatarUrl.value) {
-                URL.revokeObjectURL(previewAvatarUrl.value)
-                previewAvatarUrl.value = ''
-            }
-            selectedFile.value = null
-            
-            avatarDialogVisible.value = false
+            closeAvatarDialog()
         } else {
             feedback.msgError(data.msg || '头像修改失败')
         }
@@ -920,14 +860,16 @@ const updateAccountAvatar = async (avatarBase64: string) => {
     }
 }
 
-// 监听对话框关闭，清理URL对象
-watch(avatarDialogVisible, (newVal) => {
-    if (!newVal && previewAvatarUrl.value) {
-        URL.revokeObjectURL(previewAvatarUrl.value)
-        previewAvatarUrl.value = ''
-        selectedFile.value = null
+// 关闭头像对话框并清理资源
+const closeAvatarDialog = () => {
+    avatarDialogVisible.value = false
+    if (croppedImagePreview.value) {
+        URL.revokeObjectURL(croppedImagePreview.value)
     }
-})
+    croppedImageFile.value = null
+    croppedImagePreview.value = ''
+    currentAvatarAccount.value = null
+}
 
 // 批量验活处理
 const router = useRouter()
