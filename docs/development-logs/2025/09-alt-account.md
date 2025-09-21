@@ -285,3 +285,72 @@
 1. **权限查询优化**: 使用JOIN查询提升权限检查性能
 2. **前端状态管理**: 使用Vue 3 Composition API优化状态管理
 3. **数据验证**: 前后端双重验证确保数据完整性
+
+---
+
+### 2025-09-16 - LineApiService重试机制增强
+
+#### 问题背景
+在实际使用中发现，除了验活接口外，昵称更新和头像更新接口也会遇到状态码2（代理不可用）的情况，但这些接口缺少重试机制，导致偶发性失败率较高。
+
+#### 开发内容
+为LineApiService的昵称更新和头像更新接口添加与验活接口相同的重试机制：
+
+- **昵称更新重试**: `updateNickname()` 方法增加状态码2的重试逻辑
+- **头像更新重试**: `updateAvatar()` 方法增加状态码2的重试逻辑
+- **统一重试策略**: 与验活接口保持一致的重试参数和日志记录
+- **重试信息跟踪**: 返回重试次数和总尝试次数等详细信息
+
+#### 技术实现细节
+
+**重试逻辑特性**:
+- 仅对状态码2（代理不可用）进行重试
+- 默认最大重试5次，可自定义参数
+- 立即重试，无延迟等待
+- 详细的重试过程日志记录
+- 返回重试统计信息
+
+**方法签名变更**:
+```php
+// 原方法签名
+public static function updateNickname(string $nickname, string $mid, string $accessToken, string $proxyUrl): array
+
+// 新方法签名（向后兼容）
+public static function updateNickname(string $nickname, string $mid, string $accessToken, string $proxyUrl, int $maxRetries = 5): array
+
+// 头像更新方法同样变更
+public static function updateAvatar(string $avatarBase64, string $mid, string $accessToken, string $proxyUrl, int $maxRetries = 5): array
+```
+
+**返回数据增强**:
+```php
+[
+    'success' => bool,
+    'message' => string,
+    'code' => int,
+    'status' => string,
+    'mid' => string,
+    'retry_attempt' => int,     // 当前重试次数
+    'retried' => bool,          // 是否进行了重试
+    'total_attempts' => int     // 总尝试次数
+]
+```
+
+#### 文件变更
+- `server/app/common/service/LineApiService.php`:
+  - `updateNickname()` 方法重构，添加完整重试逻辑
+  - `updateAvatar()` 方法重构，添加完整重试逻辑
+  - 保持向后兼容，新增可选重试参数
+  - 统一重试日志记录格式
+
+#### 验证方式
+1. **基础功能测试**: 验证原有功能不受影响
+2. **重试机制测试**: 模拟代理错误，验证重试逻辑
+3. **参数兼容性**: 验证新旧调用方式都能正常工作
+4. **日志记录**: 检查重试过程的日志输出
+
+#### 预期效果
+- 显著降低昵称和头像更新的失败率
+- 提升用户体验，减少手动重试操作
+- 统一所有LineAPI接口的错误处理策略
+- 增强系统的稳定性和可靠性
