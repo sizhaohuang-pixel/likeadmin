@@ -197,7 +197,10 @@ class TaskManagementController extends BaseAdminController
             return $this->fail('权限不足');
         }
         
-        $result = TaskManagementLogic::getTenantTaskStats($tenantId);
+        // 获取任务类型参数，用于分离不同任务类型的统计
+        $taskType = $this->request->get('task_type', '');
+        
+        $result = TaskManagementLogic::getTenantTaskStats($tenantId, $taskType);
         return $this->data($result);
     }
 
@@ -209,7 +212,15 @@ class TaskManagementController extends BaseAdminController
      */
     public function get_task_detail_list()
     {
-        $params = (new BatchTaskValidate())->goCheck('detail');
+        // 获取所有请求参数
+        $allParams = $this->request->get();
+        
+        // 检查任务ID参数
+        $taskId = $allParams['id'] ?? $allParams['task_id'] ?? null;
+        if (empty($taskId) || !is_numeric($taskId) || $taskId <= 0) {
+            return $this->fail('任务ID不能为空');
+        }
+        
         $currentAdminId = $this->adminInfo['admin_id'];
         $tenantId = $this->getTenantId($currentAdminId);
         
@@ -217,8 +228,14 @@ class TaskManagementController extends BaseAdminController
             return $this->fail('权限不足');
         }
         
-        $params['tenant_id'] = $tenantId;
-        $params = array_merge($params, $this->request->get());
+        // 统一参数格式，确保使用id作为参数名
+        $params = [
+            'id' => $taskId,
+            'tenant_id' => $tenantId,
+            'status' => $allParams['status'] ?? '',
+            'page' => $allParams['page'] ?? $allParams['page_no'] ?? 1,
+            'limit' => $allParams['limit'] ?? $allParams['page_size'] ?? 20
+        ];
         
         $result = TaskManagementLogic::getTaskDetailList($params);
         return $this->data($result);
@@ -265,5 +282,143 @@ class TaskManagementController extends BaseAdminController
         }
         
         return null; // 其他角色无权限
+    }
+
+    /**
+     * @notes 批量改昵称任务列表
+     * @return \think\response\Json
+     * @author Claude
+     * @date 2025/09/22
+     */
+    public function batch_nickname_lists()
+    {
+        // 权限验证：只能查看自己租户的任务
+        $currentAdminId = $this->adminInfo['admin_id'];
+        $tenantId = $this->getTenantId($currentAdminId);
+        
+        if (!$tenantId) {
+            return $this->fail('权限不足，无法访问任务管理');
+        }
+        
+        $params = $this->request->get();
+        $params['tenant_id'] = $tenantId; // 强制限制租户范围
+        $params['task_type'] = 'batch_nickname'; // 只查询批量改昵称任务
+        
+        return $this->dataLists(new BatchTaskLists($params));
+    }
+
+    /**
+     * @notes 创建批量改昵称任务
+     * @return \think\response\Json
+     * @author Claude
+     * @date 2025/09/22
+     */
+    public function create_batch_nickname()
+    {
+        $params = (new BatchTaskValidate())->post()->goCheck('createNickname');
+        $currentAdminId = $this->adminInfo['admin_id'];
+        $tenantId = $this->getTenantId($currentAdminId);
+        
+        if (!$tenantId) {
+            return $this->fail('权限不足，无法创建任务');
+        }
+        
+        // 限制只能操作自己租户的账号
+        $params['tenant_id'] = $tenantId;
+        $params['create_admin_id'] = $currentAdminId;
+        
+        $result = TaskManagementLogic::createBatchNicknameTask($params);
+        if ($result) {
+            return $this->success('批量改昵称任务创建成功', $result);
+        }
+        return $this->fail(TaskManagementLogic::getError());
+    }
+
+    /**
+     * @notes 获取批量改昵称任务详情
+     * @return \think\response\Json
+     * @author Claude
+     * @date 2025/09/22
+     */
+    public function batch_nickname_detail()
+    {
+        $params = (new BatchTaskValidate())->goCheck('detail');
+        $currentAdminId = $this->adminInfo['admin_id'];
+        $tenantId = $this->getTenantId($currentAdminId);
+        
+        if (!$tenantId) {
+            return $this->fail('权限不足');
+        }
+        
+        $params['tenant_id'] = $tenantId;
+        $result = TaskManagementLogic::getBatchNicknameDetail($params);
+        
+        if ($result) {
+            return $this->data($result);
+        }
+        return $this->fail(TaskManagementLogic::getError());
+    }
+
+    /**
+     * @notes 取消批量改昵称任务
+     * @return \think\response\Json
+     * @author Claude
+     * @date 2025/09/22
+     */
+    public function cancel_batch_nickname()
+    {
+        $params = (new BatchTaskValidate())->post()->goCheck('cancel');
+        $currentAdminId = $this->adminInfo['admin_id'];
+        $tenantId = $this->getTenantId($currentAdminId);
+        
+        if (!$tenantId) {
+            return $this->fail('权限不足');
+        }
+        
+        $params['tenant_id'] = $tenantId;
+        $result = TaskManagementLogic::cancelBatchNicknameTask($params);
+        
+        if ($result) {
+            return $this->success('任务取消成功');
+        }
+        return $this->fail(TaskManagementLogic::getError());
+    }
+
+    /**
+     * @notes 获取账号分组选项
+     * @return \think\response\Json
+     * @author Claude
+     * @date 2025/09/22
+     */
+    public function get_account_groups()
+    {
+        $currentAdminId = $this->adminInfo['admin_id'];
+        $tenantId = $this->getTenantId($currentAdminId);
+        
+        if (!$tenantId) {
+            return $this->fail('权限不足');
+        }
+        
+        $result = TaskManagementLogic::getAccountGroups($tenantId);
+        return $this->data($result);
+    }
+
+    /**
+     * @notes 获取昵称分组选项
+     * @return \think\response\Json
+     * @author Claude
+     * @date 2025/09/22
+     */
+    public function get_nickname_groups()
+    {
+        $currentAdminId = $this->adminInfo['admin_id'];
+        $tenantId = $this->getTenantId($currentAdminId);
+        
+        if (!$tenantId) {
+            return $this->fail('权限不足');
+        }
+        
+        $result = TaskManagementLogic::getNicknameGroups($tenantId);
+        return $this->data($result);
     }
 }

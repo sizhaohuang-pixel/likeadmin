@@ -99,6 +99,78 @@ class BatchTaskDetail extends BaseModel
     }
 
     /**
+     * 获取新昵称（对于改昵称任务）
+     */
+    public function getNewNicknameAttr($value, $data)
+    {
+        // 如果是改昵称任务且执行成功，从账号表获取当前昵称
+        if ($data['status'] === self::STATUS_SUCCESS && isset($data['account']) && $data['account']) {
+            return $data['account']['nickname'] ?? '';
+        }
+        return '';
+    }
+
+    /**
+     * 获取错误信息
+     */
+    public function getErrorMessageAttr($value, $data)
+    {
+        // 如果状态是失败，返回结果信息作为错误信息
+        if ($data['status'] === self::STATUS_FAILED) {
+            return $data['result_message'] ?? '';
+        }
+        return '';
+    }
+
+    /**
+     * 获取账号昵称
+     */
+    public function getAccountNicknameAttr($value, $data)
+    {
+        // 如果有关联的账号对象，直接使用
+        if (isset($this->account) && $this->account) {
+            return $this->account->nickname ?? '';
+        }
+        // 如果数组中包含账号数据
+        if (isset($data['account']) && $data['account']) {
+            return $data['account']['nickname'] ?? '';
+        }
+        return '';
+    }
+
+    /**
+     * 获取账号手机号
+     */
+    public function getAccountPhoneAttr($value, $data)
+    {
+        // 如果有关联的账号对象，直接使用
+        if (isset($this->account) && $this->account) {
+            return $this->account->phone ?? '';
+        }
+        // 如果数组中包含账号数据
+        if (isset($data['account']) && $data['account']) {
+            return $data['account']['phone'] ?? '';
+        }
+        return '';
+    }
+
+    /**
+     * 获取原昵称
+     */
+    public function getOldNicknameAttr($value, $data)
+    {
+        return $data['old_nickname'] ?? '';
+    }
+
+    /**
+     * 获取执行时间文本
+     */
+    public function getExecuteTimeAttr($value, $data)
+    {
+        return $data['process_time'] ? date('Y-m-d H:i:s', $data['process_time']) : '';
+    }
+
+    /**
      * 批量创建任务详情
      * @param int $taskId
      * @param array $accountIds
@@ -137,20 +209,28 @@ class BatchTaskDetail extends BaseModel
      * @param string $message
      * @param int $resultCode
      * @param bool $tokenRefreshed
+     * @param string $oldNickname 原昵称（可选）
      * @return bool
      */
-    public static function updateResult(int $taskId, int $accountId, string $status, string $message = '', int $resultCode = null, bool $tokenRefreshed = false): bool
+    public static function updateResult(int $taskId, int $accountId, string $status, string $message = '', int $resultCode = null, bool $tokenRefreshed = false, string $oldNickname = ''): bool
     {
+        $updateData = [
+            'status' => $status,
+            'result_message' => $message,
+            'result_code' => $resultCode,
+            'token_refreshed' => $tokenRefreshed ? 1 : 0,
+            'process_time' => time(),
+            'update_time' => time()
+        ];
+
+        // 如果提供了原昵称，则更新
+        if (!empty($oldNickname)) {
+            $updateData['old_nickname'] = $oldNickname;
+        }
+
         $result = static::where('task_id', $taskId)
             ->where('account_id', $accountId)
-            ->update([
-                'status' => $status,
-                'result_message' => $message,
-                'result_code' => $resultCode,
-                'token_refreshed' => $tokenRefreshed ? 1 : 0,
-                'process_time' => time(),
-                'update_time' => time()
-            ]);
+            ->update($updateData);
         
         return $result > 0;
     }
@@ -189,12 +269,40 @@ class BatchTaskDetail extends BaseModel
      */
     public static function getPendingDetails(int $taskId, int $limit = 10)
     {
-        return static::where('task_id', $taskId)
-            ->where('status', self::STATUS_PENDING)
-            ->with(['account'])
-            ->order('id', 'asc')
+        // 先获取按优先级排序的account_id列表
+        $accountIds = \think\facade\Db::table('la_batch_task_detail')
+            ->alias('d')
+            ->join('la_alt_account a', 'd.account_id = a.id')
+            ->where('d.task_id', $taskId)
+            ->where('d.status', self::STATUS_PENDING)
+            ->order('CASE WHEN a.nickname IS NULL OR a.nickname = "" THEN 0 ELSE 1 END', 'asc')
+            ->order('a.create_time', 'desc')
             ->limit($limit)
+            ->column('d.account_id');
+
+        if (empty($accountIds)) {
+            return static::where('task_id', $taskId)->where('id', 0)->select(); // 返回空集合
+        }
+
+        // 根据排序后的ID获取完整的BatchTaskDetail对象
+        $details = static::where('task_id', $taskId)
+            ->where('status', self::STATUS_PENDING)
+            ->whereIn('account_id', $accountIds)
+            ->with(['account'])
             ->select();
+
+        // 手动按照优先级顺序排序
+        $sortedDetails = [];
+        foreach ($accountIds as $accountId) {
+            foreach ($details as $detail) {
+                if ($detail->account_id == $accountId) {
+                    $sortedDetails[] = $detail;
+                    break;
+                }
+            }
+        }
+
+        return collect($sortedDetails);
     }
 
     /**

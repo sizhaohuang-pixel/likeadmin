@@ -121,6 +121,9 @@ class BatchTaskProcessor extends Command
                 case BatchTask::TYPE_BATCH_VERIFY:
                     $success = $this->processBatchVerifyTask($task);
                     break;
+                case BatchTask::TYPE_BATCH_NICKNAME:
+                    $success = $this->processBatchNicknameTask($task);
+                    break;
                 default:
                     $this->output->error("未知的任务类型: {$task->task_type}");
                     $task->changeStatus(BatchTask::STATUS_FAILED);
@@ -158,6 +161,18 @@ class BatchTaskProcessor extends Command
         $this->output->writeln("执行批量验活任务 {$task->id}，共 {$task->total_count} 个账号");
         
         return BatchTaskService::processBatchVerifyTask($task);
+    }
+
+    /**
+     * 处理批量改昵称任务
+     * @param BatchTask $task
+     * @return bool
+     */
+    private function processBatchNicknameTask(BatchTask $task): bool
+    {
+        $this->output->writeln("执行批量改昵称任务 {$task->id}，共 {$task->total_count} 个账号");
+        
+        return BatchTaskService::processBatchNicknameTask($task);
     }
 
     /**

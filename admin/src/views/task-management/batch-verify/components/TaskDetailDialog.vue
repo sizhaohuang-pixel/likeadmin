@@ -115,7 +115,7 @@
                 
                 <el-table 
                     v-loading="detailLoading" 
-                    :data="detailList.list" 
+                    :data="detailList.lists" 
                     size="small"
                     max-height="400">
                     <el-table-column label="账号ID" prop="account_id" width="80" />
@@ -124,13 +124,14 @@
                             {{ row.account_uid || '-' }}
                         </template>
                     </el-table-column>
-                    <el-table-column label="账号信息" min-width="150" show-overflow-tooltip>
+                    <el-table-column label="账号昵称" prop="account_nickname" min-width="120" show-overflow-tooltip>
                         <template #default="{ row }">
-                            <div v-if="row.account">
-                                <div>MID: {{ row.account.mid }}</div>
-                                <div class="text-sm text-gray-500">昵称: {{ row.account.nickname || '无' }}</div>
-                            </div>
-                            <div v-else class="text-gray-400">账号已删除</div>
+                            {{ row.account_nickname || row.account?.nickname || '-' }}
+                        </template>
+                    </el-table-column>
+                    <el-table-column label="账号手机" prop="account_phone" min-width="120">
+                        <template #default="{ row }">
+                            {{ row.account_phone || row.account?.phone || '-' }}
                         </template>
                     </el-table-column>
                     <el-table-column label="处理状态" prop="status" width="100">

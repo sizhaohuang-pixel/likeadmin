@@ -26,20 +26,34 @@ use app\common\validate\BaseValidate;
 class BatchTaskValidate extends BaseValidate
 {
     protected $rule = [
-        'id' => 'require|integer|gt:0',
-        'task_type' => 'require|in:batch_verify',
+        'id' => 'integer|gt:0',
+        'task_id' => 'integer|gt:0',
+        'task_type' => 'require|in:batch_verify,batch_nickname',
         'search_params' => 'array',
         'account_ids' => 'array',
+        'task_name' => 'require|length:1,100',
+        'account_group_id' => 'require|integer|egt:0',
+        'nickname_group_name' => 'require|length:1,100',
     ];
 
     protected $message = [
         'id.require' => '任务ID不能为空',
         'id.integer' => '任务ID必须为整数',
         'id.gt' => '任务ID必须大于0',
+        'task_id.require' => '任务ID不能为空',
+        'task_id.integer' => '任务ID必须为整数',
+        'task_id.gt' => '任务ID必须大于0',
         'task_type.require' => '任务类型不能为空',
         'task_type.in' => '任务类型不正确',
         'search_params.array' => '搜索参数格式不正确',
         'account_ids.array' => '账号ID列表格式不正确',
+        'task_name.require' => '任务名称不能为空',
+        'task_name.length' => '任务名称长度必须在1-100个字符之间',
+        'account_group_id.require' => '账号分组不能为空',
+        'account_group_id.integer' => '账号分组必须为整数',
+        'account_group_id.egt' => '账号分组必须大于等于0',
+        'nickname_group_name.require' => '昵称分组不能为空',
+        'nickname_group_name.length' => '昵称分组名称长度必须在1-100个字符之间',
     ];
 
     /**
@@ -66,6 +80,17 @@ class BatchTaskValidate extends BaseValidate
     }
 
     /**
+     * @notes 任务详情列表场景
+     * @return BatchTaskValidate
+     * @author Claude
+     * @date 2025/09/22
+     */
+    public function sceneDetailList()
+    {
+        return $this->only([]);
+    }
+
+    /**
      * @notes 取消任务场景
      * @return BatchTaskValidate
      * @author Claude
@@ -74,6 +99,17 @@ class BatchTaskValidate extends BaseValidate
     public function sceneCancel()
     {
         return $this->only(['id']);
+    }
+
+    /**
+     * @notes 创建批量改昵称任务场景
+     * @return BatchTaskValidate
+     * @author Claude
+     * @date 2025/09/22
+     */
+    public function sceneCreateNickname()
+    {
+        return $this->only(['task_name', 'account_group_id', 'nickname_group_name']);
     }
 
     /**
@@ -136,13 +172,39 @@ class BatchTaskValidate extends BaseValidate
     public function checkTaskType($value)
     {
         $allowedTypes = [
-            'batch_verify' => '批量验活'
+            'batch_verify' => '批量验活',
+            'batch_nickname' => '批量改昵称'
         ];
 
         if (!isset($allowedTypes[$value])) {
             return '不支持的任务类型';
         }
 
+        return true;
+    }
+
+    /**
+     * @notes 检查任务ID是否存在（支持id或task_id两种参数名）
+     * @param $value
+     * @param $rule
+     * @param $data
+     * @return bool|string
+     * @author Claude
+     * @date 2025/09/22
+     */
+    public function checkTaskIdExists($value, $rule, $data)
+    {
+        // 检查是否至少提供了一个任务ID参数
+        $taskId = $data['id'] ?? $data['task_id'] ?? null;
+        
+        if (empty($taskId)) {
+            return '任务ID不能为空';
+        }
+        
+        if (!is_numeric($taskId) || $taskId <= 0) {
+            return '任务ID必须是大于0的整数';
+        }
+        
         return true;
     }
 }

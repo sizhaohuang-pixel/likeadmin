@@ -136,8 +136,10 @@ class LineApiService
                                 $lastResult['total_attempts'] = $attempt + 1;
                                 if ($code === self::STATUS_PROXY_ERROR) {
                                     $lastResult['message'] .= "（重试{$attempt}次后仍失败）";
-                                } else {
+                                } else if ($success) {
                                     $lastResult['message'] .= "（第" . ($attempt + 1) . "次尝试成功）";
+                                } else {
+                                    $lastResult['message'] .= "（重试{$attempt}次后仍失败）";
                                 }
                             }
                             return $lastResult;
@@ -349,8 +351,10 @@ class LineApiService
                                 $lastResult['total_attempts'] = $attempt + 1;
                                 if ($code === 2) {
                                     $lastResult['message'] .= "（重试{$attempt}次后仍失败）";
-                                } else {
+                                } else if ($code === 1) {
                                     $lastResult['message'] .= "（第" . ($attempt + 1) . "次尝试成功）";
+                                } else {
+                                    $lastResult['message'] .= "（重试{$attempt}次后仍失败）";
                                 }
                             }
                             return $lastResult;
@@ -417,6 +421,14 @@ class LineApiService
         $attempt = 0;
         $lastResult = null;
 
+        $payload = [
+            'type' => 'UpdateAvatar',
+            'Avatar' => $avatarBase64,
+            'proxy' => $proxyUrl,
+            'mid' => $mid,
+            'accessToken' => $accessToken
+        ];
+
         while ($attempt <= $maxRetries) {
             try {
                 $payload = [
@@ -428,8 +440,6 @@ class LineApiService
                 ];
 
                 $response = self::sendRequest(self::API_URL, $payload);
-
-                \think\facade\Log::info('LINE API更新头像:' . $response);
 
                 if ($response === false) {
                     $lastResult = [
@@ -472,8 +482,10 @@ class LineApiService
                                 $lastResult['total_attempts'] = $attempt + 1;
                                 if ($code === 2) {
                                     $lastResult['message'] .= "（重试{$attempt}次后仍失败）";
-                                } else {
+                                } else if ($code === 1) {
                                     $lastResult['message'] .= "（第" . ($attempt + 1) . "次尝试成功）";
+                                } else {
+                                    $lastResult['message'] .= "（重试{$attempt}次后仍失败）";
                                 }
                             }
                             return $lastResult;

@@ -19,6 +19,9 @@ namespace app\adminapi\logic;
 use app\common\logic\BaseLogic;
 use app\common\model\BatchTask;
 use app\common\model\BatchTaskDetail;
+use app\common\model\AltAccountGroup;
+use app\common\model\AltAccount;
+use app\common\model\NicknameRepository;
 use app\common\service\BatchTaskService;
 use think\facade\Log;
 
@@ -289,19 +292,21 @@ class TaskManagementLogic extends BaseLogic
     }
 
     /**
-     * @notes 获取租户任务统计
+     * @notes 获取租户任务统计（按任务类型）
      * @param int $tenantId
+     * @param string $taskType
      * @return array
      * @author Claude
-     * @date 2025/09/08
+     * @date 2025/09/22
      */
-    public static function getTenantTaskStats(int $tenantId): array
+    public static function getTenantTaskStats(int $tenantId, string $taskType = ''): array
     {
         try {
-            return BatchTaskService::getTenantTaskStats($tenantId);
+            return BatchTaskService::getTenantTaskStats($tenantId, $taskType);
         } catch (\Exception $e) {
             Log::error('获取租户任务统计异常', [
                 'tenant_id' => $tenantId,
+                'task_type' => $taskType,
                 'error' => $e->getMessage()
             ]);
             
@@ -327,7 +332,7 @@ class TaskManagementLogic extends BaseLogic
     public static function getTaskDetailList(array $params): array
     {
         try {
-            $taskId = $params['id'];
+            $taskId = $params['id'] ?? $params['task_id']; // 支持两种参数名
             $tenantId = $params['tenant_id'];
             $page = $params['page'] ?? 1;
             $limit = $params['limit'] ?? 20;
@@ -340,7 +345,7 @@ class TaskManagementLogic extends BaseLogic
                 
             if (!$task) {
                 return [
-                    'list' => [],
+                    'lists' => [], // 修改为lists
                     'count' => 0,
                     'page' => $page,
                     'limit' => $limit
@@ -360,7 +365,13 @@ class TaskManagementLogic extends BaseLogic
                     'status_desc',
                     'status_icon',
                     'process_time_text',
-                    'token_refreshed_text'
+                    'token_refreshed_text',
+                    'new_nickname',
+                    'old_nickname',
+                    'error_message',
+                    'account_nickname',
+                    'account_phone',
+                    'execute_time'
                 ])
                 ->order('id', 'asc')
                 ->paginate([
@@ -369,7 +380,7 @@ class TaskManagementLogic extends BaseLogic
                 ]);
                 
             return [
-                'list' => $result->items(),
+                'lists' => $result->items(), // 修改为lists以匹配前端usePaging的期望
                 'count' => $result->total(),
                 'page' => $page,
                 'limit' => $limit,
@@ -383,11 +394,287 @@ class TaskManagementLogic extends BaseLogic
             ]);
             
             return [
-                'list' => [],
+                'lists' => [], // 修改为lists
                 'count' => 0,
                 'page' => $params['page'] ?? 1,
                 'limit' => $params['limit'] ?? 20
             ];
+        }
+    }
+
+    /**
+     * @notes 创建批量改昵称任务
+     * @param array $params
+     * @return array|false
+     * @author Claude
+     * @date 2025/09/22
+     */
+    public static function createBatchNicknameTask(array $params)
+    {
+        try {
+            $tenantId = $params['tenant_id'];
+            $createAdminId = $params['create_admin_id'];
+            $taskName = $params['task_name'];
+            $accountGroupId = (int)$params['account_group_id']; // 确保转换为整数
+            $nicknameGroupName = $params['nickname_group_name'];
+            
+            // 创建任务
+            $task = BatchTaskService::createBatchNicknameTask(
+                $tenantId,
+                $createAdminId,
+                $taskName,
+                $accountGroupId,
+                $nicknameGroupName
+            );
+            
+            if (!$task) {
+                self::setError('创建批量改昵称任务失败');
+                return false;
+            }
+            
+            // 记录日志
+            Log::info('创建批量改昵称任务', [
+                'task_id' => $task->id,
+                'tenant_id' => $tenantId,
+                'create_admin_id' => $createAdminId,
+                'total_count' => $task->total_count,
+                'account_group_id' => $accountGroupId,
+                'nickname_group_name' => $nicknameGroupName
+            ]);
+            
+            return [
+                'task_id' => $task->id,
+                'task_name' => $task->task_name,
+                'total_count' => $task->total_count,
+                'task_status' => $task->task_status,
+                'task_status_desc' => $task->task_status_desc
+            ];
+            
+        } catch (\Exception $e) {
+            self::setError($e->getMessage());
+            Log::error('创建批量改昵称任务异常', [
+                'params' => $params,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            return false;
+        }
+    }
+
+    /**
+     * @notes 获取批量改昵称任务详情
+     * @param array $params
+     * @return array|false
+     * @author Claude
+     * @date 2025/09/22
+     */
+    public static function getBatchNicknameDetail(array $params)
+    {
+        try {
+            $taskId = $params['id'];
+            $tenantId = $params['tenant_id'];
+            
+            // 获取任务信息并验证权限
+            $task = BatchTask::where('id', $taskId)
+                ->where('tenant_id', $tenantId)
+                ->where('task_type', BatchTask::TYPE_BATCH_NICKNAME)
+                ->with(['createAdmin'])
+                ->find();
+                
+            if (!$task) {
+                self::setError('任务不存在或权限不足');
+                return false;
+            }
+            
+            // 获取统计信息
+            $stats = BatchTaskDetail::where('task_id', $taskId)
+                ->field([
+                    'COUNT(*) as total_count',
+                    'COUNT(CASE WHEN status = \'success\' THEN 1 END) as success_count',
+                    'COUNT(CASE WHEN status = \'failed\' THEN 1 END) as failed_count',
+                    'COUNT(CASE WHEN status = \'pending\' THEN 1 END) as pending_count'
+                ])
+                ->find();
+            
+            // 获取任务数据详情
+            $taskData = $task->task_data_array;
+            
+            return [
+                'id' => $task->id,
+                'task_name' => $task->task_name,
+                'task_type' => $task->task_type,
+                'task_type_desc' => $task->task_type_desc,
+                'task_status' => $task->task_status,
+                'task_status_desc' => $task->task_status_desc,
+                'total_count' => $task->total_count,
+                'processed_count' => $task->processed_count,
+                'success_count' => $task->success_count,
+                'failed_count' => $task->failed_count,
+                'progress_percent' => $task->progress_percent,
+                'success_rate' => $task->success_rate,
+                'create_time' => $task->create_time,
+                'start_time' => $task->start_time,
+                'end_time' => $task->end_time,
+                'start_time_text' => $task->start_time_text,
+                'end_time_text' => $task->end_time_text,
+                'duration_text' => $task->duration_text,
+                'create_admin_name' => $task->createAdmin->real_name ?? '未知',
+                'error_message' => $task->error_message,
+                'account_group_id' => $taskData['account_group_id'] ?? '',
+                'nickname_group_name' => $taskData['nickname_group_name'] ?? '',
+                // 统计信息
+                'stats_total_count' => $stats->total_count ?? 0,
+                'stats_success_count' => $stats->success_count ?? 0,
+                'stats_failed_count' => $stats->failed_count ?? 0,
+                'stats_pending_count' => $stats->pending_count ?? 0
+            ];
+            
+        } catch (\Exception $e) {
+            self::setError('获取任务详情失败');
+            Log::error('获取批量改昵称任务详情异常', [
+                'params' => $params,
+                'error' => $e->getMessage()
+            ]);
+            return false;
+        }
+    }
+
+    /**
+     * @notes 取消批量改昵称任务
+     * @param array $params
+     * @return bool
+     * @author Claude
+     * @date 2025/09/22
+     */
+    public static function cancelBatchNicknameTask(array $params): bool
+    {
+        try {
+            $taskId = $params['id'];
+            $tenantId = $params['tenant_id'];
+            
+            // 获取任务并验证权限
+            $task = BatchTask::where('id', $taskId)
+                ->where('tenant_id', $tenantId)
+                ->where('task_type', BatchTask::TYPE_BATCH_NICKNAME)
+                ->find();
+                
+            if (!$task) {
+                self::setError('任务不存在或权限不足');
+                return false;
+            }
+            
+            if (!$task->canCancel()) {
+                self::setError('任务状态不允许取消');
+                return false;
+            }
+            
+            // 更新任务状态
+            $result = $task->changeStatus(BatchTask::STATUS_CANCELLED);
+            if (!$result) {
+                self::setError('取消任务失败');
+                return false;
+            }
+            
+            Log::info('取消批量改昵称任务', [
+                'task_id' => $taskId,
+                'tenant_id' => $tenantId
+            ]);
+            
+            return true;
+            
+        } catch (\Exception $e) {
+            self::setError('取消任务异常');
+            Log::error('取消批量改昵称任务异常', [
+                'params' => $params,
+                'error' => $e->getMessage()
+            ]);
+            return false;
+        }
+    }
+
+    /**
+     * @notes 获取账号分组选项
+     * @param int $tenantId
+     * @return array
+     * @author Claude
+     * @date 2025/09/22
+     */
+    public static function getAccountGroups(int $tenantId): array
+    {
+        try {
+            $groups = AltAccountGroup::where('tenant_id', $tenantId)
+                ->whereNull('delete_time')
+                ->field(['id', 'name'])
+                ->order('id', 'asc')
+                ->select()
+                ->toArray();
+            
+            // 为每个分组统计账号数量
+            foreach ($groups as &$group) {
+                $accountCount = AltAccount::where('tenant_id', $tenantId)
+                    ->where('group_id', $group['id'])
+                    ->whereNull('delete_time')
+                    ->count();
+                $group['account_count'] = $accountCount;
+            }
+            
+            // 添加未分组选项
+            $ungroupedCount = AltAccount::where('tenant_id', $tenantId)
+                ->where(function($query) {
+                    $query->where('group_id', 0)->whereOr('group_id', null);
+                })
+                ->whereNull('delete_time')
+                ->count();
+                
+            array_unshift($groups, [
+                'id' => 0,
+                'name' => '未分组',
+                'account_count' => $ungroupedCount
+            ]);
+            
+            return $groups;
+            
+        } catch (\Exception $e) {
+            Log::error('获取账号分组失败', [
+                'tenant_id' => $tenantId,
+                'error' => $e->getMessage()
+            ]);
+            return [];
+        }
+    }
+
+    /**
+     * @notes 获取昵称分组选项
+     * @param int $tenantId
+     * @return array
+     * @author Claude
+     * @date 2025/09/22
+     */
+    public static function getNicknameGroups(int $tenantId): array
+    {
+        try {
+            // 使用原生SQL获取昵称分组统计
+            $sql = "SELECT group_name as name, 
+                           COUNT(*) as total_count,
+                           COUNT(CASE WHEN status = 1 THEN 1 END) as available_count
+                    FROM la_nickname_repository 
+                    WHERE tenant_id = ? 
+                      AND delete_time IS NULL 
+                      AND nickname <> '_placeholder_'
+                    GROUP BY group_name 
+                    HAVING total_count > 0 
+                    ORDER BY group_name ASC";
+                    
+            $groups = \think\facade\Db::query($sql, [$tenantId]);
+            
+            return $groups ?: [];
+            
+        } catch (\Exception $e) {
+            Log::error('获取昵称分组失败', [
+                'tenant_id' => $tenantId,
+                'error' => $e->getMessage()
+            ]);
+            return [];
         }
     }
 }

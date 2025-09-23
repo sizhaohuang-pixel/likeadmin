@@ -44,6 +44,7 @@ class BatchTask extends BaseModel
      * 任务类型常量
      */
     const TYPE_BATCH_VERIFY = 'batch_verify';
+    const TYPE_BATCH_NICKNAME = 'batch_nickname';
 
     /**
      * 状态描述
@@ -60,7 +61,8 @@ class BatchTask extends BaseModel
      * 任务类型描述
      */
     const TYPE_DESC = [
-        self::TYPE_BATCH_VERIFY => '批量验活'
+        self::TYPE_BATCH_VERIFY => '批量验活',
+        self::TYPE_BATCH_NICKNAME => '批量改昵称'
     ];
 
     /**

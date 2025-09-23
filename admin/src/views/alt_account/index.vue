@@ -835,23 +835,23 @@ const updateAccountAvatar = async (avatarBase64: string) => {
     isUpdatingAvatar.value = true
     
     try {
-        const { data } = await apiAltAccountUpdateAvatar({
+        const res = await apiAltAccountUpdateAvatar({
             id: currentAvatarAccount.value.id,
             avatar: avatarBase64
         })
         
-        if (data.code === 1) {
-            feedback.msgSuccess(data.msg || '头像修改成功')
+        if (res?.success) {
+            feedback.msgSuccess(res.message || '头像修改成功')
             
             // 更新本地数据
             const accountIndex = pager.lists.findIndex((item: any) => item.id === currentAvatarAccount.value.id)
             if (accountIndex !== -1) {
-                pager.lists[accountIndex].avatar = data.data?.avatar_url || pager.lists[accountIndex].avatar
+                pager.lists[accountIndex].avatar = res.avatar_url || pager.lists[accountIndex].avatar
             }
             
             closeAvatarDialog()
         } else {
-            feedback.msgError(data.msg || '头像修改失败')
+            feedback.msgError(res?.message || '头像修改失败')
         }
     } catch (error: any) {
         feedback.msgError(error?.message || '头像修改失败')

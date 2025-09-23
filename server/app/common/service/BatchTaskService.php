@@ -19,6 +19,7 @@ namespace app\common\service;
 use app\common\model\BatchTask;
 use app\common\model\BatchTaskDetail;
 use app\common\model\AltAccount;
+use app\common\model\NicknameRepository;
 use app\common\service\LineApiService;
 use think\facade\Db;
 use think\facade\Log;
@@ -480,10 +481,16 @@ class BatchTaskService
      * @param int $tenantId
      * @return array
      */
-    public static function getTenantTaskStats(int $tenantId): array
+    public static function getTenantTaskStats(int $tenantId, string $taskType = ''): array
     {
-        $stats = BatchTask::where('tenant_id', $tenantId)
-            ->field([
+        $query = BatchTask::where('tenant_id', $tenantId);
+        
+        // 如果指定了任务类型，则只统计指定类型的任务
+        if (!empty($taskType)) {
+            $query->where('task_type', $taskType);
+        }
+        
+        $stats = $query->field([
                 'task_status',
                 'COUNT(*) as count',
                 'SUM(total_count) as total_accounts',
@@ -576,5 +583,288 @@ class BatchTaskService
         }
 
         return false;
+    }
+
+    /**
+     * 创建批量改昵称任务
+     * @param int $tenantId 租户ID
+     * @param int $createAdminId 创建人ID
+     * @param string $taskName 任务名称
+     * @param int $accountGroupId 账号分组ID
+     * @param string $nicknameGroupName 昵称分组名称
+     * @return BatchTask|false
+     * @throws \Exception
+     */
+    public static function createBatchNicknameTask(int $tenantId, int $createAdminId, string $taskName, int $accountGroupId, string $nicknameGroupName)
+    {
+        // 检查是否已有运行中的同类型任务
+        if (BatchTask::hasRunningTask($tenantId, BatchTask::TYPE_BATCH_NICKNAME)) {
+            throw new \Exception('您已有正在执行的批量改昵称任务，请等待完成后再试');
+        }
+
+        // 获取账号分组中的账号列表
+        $accountIds = self::getAccountIdsByGroup($tenantId, $accountGroupId);
+        if (empty($accountIds)) {
+            throw new \Exception('选择的账号分组中没有可用账号');
+        }
+
+        // 检查昵称分组中的可用昵称数量
+        $availableNicknameCount = NicknameRepository::where('tenant_id', $tenantId)
+            ->where('group_name', $nicknameGroupName)
+            ->where('status', NicknameRepository::STATUS_AVAILABLE)
+            ->where('nickname', '<>', '_placeholder_')
+            ->count();
+
+        if ($availableNicknameCount < count($accountIds)) {
+            throw new \Exception("昵称分组 '{$nicknameGroupName}' 中可用昵称数量不足，需要 " . count($accountIds) . " 个，实际只有 {$availableNicknameCount} 个");
+        }
+
+        // 限制批量任务数量
+        if (count($accountIds) > 1000) {
+            throw new \Exception('单次批量操作不能超过1000个账号');
+        }
+
+        // 开始事务
+        return Db::transaction(function () use ($tenantId, $createAdminId, $taskName, $accountGroupId, $nicknameGroupName, $accountIds) {
+            // 创建批量任务
+            $task = BatchTask::create([
+                'tenant_id' => $tenantId,
+                'task_name' => $taskName,
+                'task_type' => BatchTask::TYPE_BATCH_NICKNAME,
+                'task_status' => BatchTask::STATUS_PENDING,
+                'total_count' => count($accountIds),
+                'task_data' => json_encode([
+                    'account_group_id' => $accountGroupId,
+                    'nickname_group_name' => $nicknameGroupName,
+                    'account_ids' => $accountIds
+                ]),
+                'create_admin_id' => $createAdminId,
+                'create_time' => time(),
+                'update_time' => time()
+            ]);
+
+            if (!$task) {
+                throw new \Exception('创建批量任务失败');
+            }
+
+            // 创建任务详情
+            if (!BatchTaskDetail::createBatchDetails($task->id, $accountIds)) {
+                throw new \Exception('创建任务详情失败');
+            }
+
+            return $task;
+        });
+    }
+
+    /**
+     * 根据账号分组获取账号ID列表
+     * @param int $tenantId 租户ID
+     * @param int $groupId 分组ID
+     * @return array
+     */
+    private static function getAccountIdsByGroup(int $tenantId, int $groupId): array
+    {
+        $query = AltAccount::where('tenant_id', $tenantId)
+            ->whereNull('delete_time');
+
+        if ($groupId > 0) {
+            // 选择具体分组的账号
+            $query->where('group_id', $groupId);
+        } else {
+            // 选择未分组的账号（group_id为0或NULL）
+            $query->where(function($q) {
+                $q->where('group_id', 0)->whereOr('group_id', null);
+            });
+        }
+
+        return $query->column('id');
+    }
+
+    /**
+     * 处理批量改昵称任务
+     * @param BatchTask $task 任务对象
+     * @return bool
+     */
+    public static function processBatchNicknameTask(BatchTask $task): bool
+    {
+        Log::info('开始处理批量改昵称任务', ['task_id' => $task->id, 'task_name' => $task->task_name]);
+
+        try {
+            // 更新任务状态为运行中
+            $task->changeStatus(BatchTask::STATUS_RUNNING);
+
+            $taskData = $task->task_data_array;
+            $nicknameGroupName = $taskData['nickname_group_name'];
+            
+            // 获取待处理的任务详情
+            $pendingDetails = BatchTaskDetail::where('task_id', $task->id)
+                ->where('status', BatchTaskDetail::STATUS_PENDING)
+                ->select();
+
+            $successCount = 0;
+            $failedCount = 0;
+            $processedCount = 0;
+
+            foreach ($pendingDetails as $detail) {
+                try {
+                    // 每处理10个账号检查一次数据库连接
+                    if ($processedCount % 10 === 0) {
+                        self::ensureDatabaseConnection();
+                    }
+
+                    // 获取账号信息
+                    $account = AltAccount::find($detail->account_id);
+                    if (!$account) {
+                        BatchTaskDetail::updateResult($task->id, $detail->account_id, BatchTaskDetail::STATUS_FAILED, '账号不存在');
+                        $failedCount++;
+                        continue;
+                    }
+
+                    // 验证账号对象的完整性
+                    if (!$account->id || $account->id != $detail->account_id) {
+                        Log::error("账号对象ID不匹配", [
+                            'account_object_id' => $account->id,
+                            'detail_account_id' => $detail->account_id
+                        ]);
+                        BatchTaskDetail::updateResult($task->id, $detail->account_id, BatchTaskDetail::STATUS_FAILED, '账号数据异常');
+                        $failedCount++;
+                        continue;
+                    }
+
+                    // 检查必要字段
+                    if (empty($account->mid) || empty($account->accesstoken) || empty($account->proxy_url)) {
+                        BatchTaskDetail::updateResult($task->id, $detail->account_id, BatchTaskDetail::STATUS_FAILED, '账号信息不完整，缺少MID、访问令牌或代理地址');
+                        $failedCount++;
+                        continue;
+                    }
+
+                    // 获取可用昵称
+                    $nickname = self::getAvailableNickname($task->tenant_id, $nicknameGroupName);
+                    if (!$nickname) {
+                        BatchTaskDetail::updateResult($task->id, $detail->account_id, BatchTaskDetail::STATUS_FAILED, '没有可用的昵称');
+                        $failedCount++;
+                        continue;
+                    }
+
+                    // 调用LINE API更新昵称
+                    $result = LineApiService::updateNickname(
+                        $nickname['nickname'],
+                        $account->mid,
+                        $account->accesstoken,
+                        $account->proxy_url
+                    );
+
+                    if ($result['success']) {
+                        // 保存原昵称
+                        $oldNickname = $account->nickname ?: '';
+
+                        // 更新成功，标记昵称为已使用
+                        NicknameRepository::where('id', $nickname['id'])->update([
+                            'status' => NicknameRepository::STATUS_USED,
+                            'update_time' => time()
+                        ]);
+
+                        // 更新账号昵称
+                        try {
+                            $updateResult = AltAccount::where('id', $account->id)->update(['nickname' => $nickname['nickname']]);
+                            if (!$updateResult) {
+                                Log::warning("账号昵称更新失败，账号ID: {$account->id}，昵称: {$nickname['nickname']}");
+                            }
+                        } catch (\Exception $updateException) {
+                            Log::error("更新账号昵称时异常: " . $updateException->getMessage(), [
+                                'account_id' => $account->id,
+                                'nickname' => $nickname['nickname']
+                            ]);
+                            throw $updateException;
+                        }
+
+                        BatchTaskDetail::updateResult($task->id, $detail->account_id, BatchTaskDetail::STATUS_SUCCESS, $result['message'], null, false, $oldNickname);
+                        $successCount++;
+                    } else {
+                        // 处理失败时释放昵称（不标记为已使用）
+                        BatchTaskDetail::updateResult($task->id, $detail->account_id, BatchTaskDetail::STATUS_FAILED, $result['message']);
+                        $failedCount++;
+                    }
+
+                } catch (\Exception $e) {
+                    Log::error('处理单个账号昵称更新失败', [
+                        'task_id' => $task->id,
+                        'account_id' => $detail->account_id,
+                        'error' => $e->getMessage()
+                    ]);
+                    BatchTaskDetail::updateResult($task->id, $detail->account_id, BatchTaskDetail::STATUS_FAILED, '昵称更新异常：' . $e->getMessage());
+                    $failedCount++;
+                }
+
+                $processedCount++;
+                
+                // 更新任务进度
+                $task->updateProgress($processedCount, $successCount, $failedCount);
+                
+                // 添加延迟，避免频繁调用API
+                usleep(500000); // 0.5秒延迟
+            }
+
+            // 任务完成，更新最终状态
+            if ($failedCount === 0) {
+                $task->changeStatus(BatchTask::STATUS_COMPLETED);
+            } else if ($successCount === 0) {
+                $task->changeStatus(BatchTask::STATUS_FAILED);
+                $task->error_message = "所有账号处理失败";
+                $task->save();
+            } else {
+                $task->changeStatus(BatchTask::STATUS_COMPLETED);
+            }
+
+            Log::info('批量改昵称任务处理完成', [
+                'task_id' => $task->id,
+                'total' => $processedCount,
+                'success' => $successCount,
+                'failed' => $failedCount
+            ]);
+
+            return true;
+
+        } catch (\Exception $e) {
+            Log::error('批量改昵称任务处理异常', [
+                'task_id' => $task->id,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            $task->changeStatus(BatchTask::STATUS_FAILED);
+            $task->error_message = '任务执行异常：' . $e->getMessage();
+            $task->save();
+
+            return false;
+        }
+    }
+
+    /**
+     * 获取可用昵称
+     * @param int $tenantId 租户ID
+     * @param string $groupName 昵称分组名称
+     * @return array|null
+     */
+    private static function getAvailableNickname(int $tenantId, string $groupName): ?array
+    {
+        return Db::transaction(function () use ($tenantId, $groupName) {
+            // 使用行锁获取第一个可用昵称
+            $nickname = NicknameRepository::where('tenant_id', $tenantId)
+                ->where('group_name', $groupName)
+                ->where('status', NicknameRepository::STATUS_AVAILABLE)
+                ->where('nickname', '<>', '_placeholder_')
+                ->lock(true)
+                ->find();
+
+            if (!$nickname) {
+                return null;
+            }
+
+            return [
+                'id' => $nickname->id,
+                'nickname' => $nickname->nickname
+            ];
+        });
     }
 }
